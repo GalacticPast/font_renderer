@@ -1,0 +1,33 @@
+BasedOnStyle: Microsoft
+IndentCaseLabels: true 
+
+AlignConsecutiveAssignments:
+  Enabled: true
+  AcrossEmptyLines: false 
+  AcrossComments: true
+  AlignCompound: true
+  AlignFunctionPointers: true
+
+AlignConsecutiveDeclarations:
+  Enabled: true
+  AlignCompound: true
+
+BraceWrapping:
+  AfterCaseLabel: false
+  AfterClass: true
+  AfterControlStatement: Always
+  AfterEnum: true
+  AfterFunction: true
+  AfterNamespace: true
+  AfterObjCDeclaration: true
+  AfterStruct: true
+  AfterUnion: false
+  AfterExternBlock: true
+  BeforeCatch: true
+  BeforeElse: true
+  BeforeLambdaBody: false
+  BeforeWhile: false
+  IndentBraces: false
+  SplitEmptyFunction: true
+  SplitEmptyRecord: true
+  SplitEmptyNamespace: true
