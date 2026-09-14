@@ -719,6 +719,10 @@ void  db_string_set(db_string *const str, char const *cstr);
 #define db_hash_string(data) db_murmur64A_seed(data, strlen(data), DB_HASH_SEED)
 u64 db_murmur64A_seed(void const *const key, u64 len, u64 seed);
 
+// os stuff
+
+void db_load_file(db_arena *arena, db_string *file_name);
+
 /*
 ▗▄▄▄▖▗▖  ▗▖▗▄▄▖ ▗▖   ▗▄▄▄▖▗▖  ▗▖▗▄▄▄▖▗▖  ▗▖▗▄▄▄▖▗▄▖▗▄▄▄▖▗▄▄▄▖ ▗▄▖ ▗▖  ▗▖
   █  ▐▛▚▞▜▌▐▌ ▐▌▐▌   ▐▌   ▐▛▚▞▜▌▐▌   ▐▛▚▖▐▌  █ ▐▌ ▐▌ █    █  ▐▌ ▐▌▐▛▚▖▐▌

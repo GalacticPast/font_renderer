@@ -1,9 +1,9 @@
 #include "../input.h"
 #include "platform.h"
 
+#include "../glad.h"
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
-#include <GL/gl.h>
 //
 // Linux platform layer.
 #ifdef DPLATFORM_LINUX
@@ -763,6 +763,27 @@ static void wl_keyboard_repeat_info(void *data, struct wl_keyboard *wl_keyboard,
 
 //
 
+static struct wl_keyboard_listener wl_keyboard_listener = {
+    .keymap      = wl_keyboard_keymap,
+    .enter       = wl_keyboard_enter,
+    .leave       = wl_keyboard_leave,
+    .key         = wl_keyboard_key,
+    .modifiers   = wl_keyboard_modifiers,
+    .repeat_info = wl_keyboard_repeat_info,
+};
+
+static struct wl_pointer_listener wl_pointer_listener = {.enter                   = wl_pointer_enter,
+                                                         .leave                   = wl_pointer_leave,
+                                                         .motion                  = wl_pointer_move,
+                                                         .button                  = wl_pointer_button_event,
+                                                         .axis                    = wl_pointer_axis,
+                                                         .frame                   = wl_pointer_frame,
+                                                         .axis_source             = wl_pointer_axis_source,
+                                                         .axis_stop               = wl_pointer_axis_stop,
+                                                         .axis_discrete           = wl_pointer_axis_discrete,
+                                                         .axis_value120           = wl_pointer_axis_value120,
+                                                         .axis_relative_direction = wl_pointer_axis_relative_direction};
+
 static void wl_seat_capabilites(void *data, struct wl_seat *wl_seat, u32 capabilities)
 {
 
@@ -770,15 +791,6 @@ static void wl_seat_capabilites(void *data, struct wl_seat *wl_seat, u32 capabil
     //
     bool have_keyboard = capabilities & WL_SEAT_CAPABILITY_KEYBOARD;
     bool have_mouse    = capabilities & WL_SEAT_CAPABILITY_POINTER || capabilities & WL_SEAT_CAPABILITY_TOUCH;
-
-    struct wl_keyboard_listener wl_keyboard_listener = {
-        .keymap      = wl_keyboard_keymap,
-        .enter       = wl_keyboard_enter,
-        .leave       = wl_keyboard_leave,
-        .key         = wl_keyboard_key,
-        .modifiers   = wl_keyboard_modifiers,
-        .repeat_info = wl_keyboard_repeat_info,
-    };
 
     if (have_keyboard && platform_state_ptr->wl_keyboard == NULL)
     {
@@ -790,18 +802,6 @@ static void wl_seat_capabilites(void *data, struct wl_seat *wl_seat, u32 capabil
         wl_keyboard_release(platform_state_ptr->wl_keyboard);
         platform_state_ptr->wl_keyboard = NULL;
     }
-
-    struct wl_pointer_listener wl_pointer_listener = {.enter                   = wl_pointer_enter,
-                                                      .leave                   = wl_pointer_leave,
-                                                      .motion                  = wl_pointer_move,
-                                                      .button                  = wl_pointer_button_event,
-                                                      .axis                    = wl_pointer_axis,
-                                                      .frame                   = wl_pointer_frame,
-                                                      .axis_source             = wl_pointer_axis_source,
-                                                      .axis_stop               = wl_pointer_axis_stop,
-                                                      .axis_discrete           = wl_pointer_axis_discrete,
-                                                      .axis_value120           = wl_pointer_axis_value120,
-                                                      .axis_relative_direction = wl_pointer_axis_relative_direction};
 
     if (have_mouse && platform_state_ptr->wl_pointer == NULL)
     {
@@ -851,7 +851,7 @@ struct xdg_toplevel_listener xdg_toplevel_listener = {.configure        = xdg_to
 
 static void xdg_surface_configure(void *data, struct xdg_surface *xdg_surface, u32 serial)
 {
-    printf("%s%d\n", "wtf is serial surface configure %d", serial);
+    // printf("%s%d\n", "wtf is serial surface configure %d", serial);
     xdg_surface_ack_configure(xdg_surface, serial);
     wl_surface_commit(platform_state_ptr->wl_surface);
 }
@@ -863,7 +863,7 @@ static const struct xdg_surface_listener xdg_surface_listener = {
 // shell
 static void xdg_wm_base_ping(void *data, struct xdg_wm_base *xdg_wm_base, u32 serial)
 {
-    printf("%s%d\n", "wtf is serial wm base ping %d", serial);
+    // printf("%s%d\n", "wtf is serial wm base ping %d", serial);
     xdg_wm_base_pong(xdg_wm_base, serial);
 }
 
@@ -1067,8 +1067,13 @@ b8 platform_startup(db_arena *arena, char *application_name, s32 x, s32 y, s32 w
         return false;
     }
 
+    if (!gladLoadGLLoader((GLADloadproc)eglGetProcAddress))
+    {
+        printf("Failed to initialize GLAD\n");
+        return false;
+    }
+
     printf("Opengl initialization sucessful.\n");
-    return true;
 
     wl_surface_commit(platform_state_ptr->wl_surface);
 
@@ -1089,8 +1094,9 @@ void platform_swap_buffers()
 
 b8 platform_pump_messages()
 {
+    wl_display_flush(platform_state_ptr->wl_display);
 
-    s32 result = wl_display_dispatch(platform_state_ptr->wl_display);
+    s32 result = wl_display_dispatch_pending(platform_state_ptr->wl_display);
 
     return result == -1 ? false : true;
 }
