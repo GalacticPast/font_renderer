@@ -601,9 +601,10 @@ keys translate_keycode(u32 xk_keycode)
 #include "../platform/wayland/xdg-decoration-unstable-v1.h"
 #include "../platform/wayland/xdg-shell-client-protocol.h"
 
+#include "../../vendor/xkbcommon/xkbcommon-keysyms.h"
+#include "../../vendor/xkbcommon/xkbcommon.h"
+
 #include <wayland-egl.h>
-#include <xkbcommon/xkbcommon-keysyms.h>
-#include <xkbcommon/xkbcommon.h> // sudo apt-get install libxkbcommon-dev
 
 #include <fcntl.h>
 #include <sys/mman.h>

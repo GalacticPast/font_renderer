@@ -721,147 +721,147 @@ u64 db_murmur64A_seed(void const *const key, u64 len, u64 seed);
 
 // os stuff
 
-typedef u32 db_file_mode;
-typedef enum db_file_mode_flag
-{
-    db_file_mode_Read   = bit0,
-    db_file_mode_Write  = bit1,
-    db_file_mode_Append = bit2,
-    db_file_mode_Rw     = bit3,
-
-    db_file_mode_Modes = db_file_mode_Read | db_file_mode_Write | db_file_mode_Append | db_file_mode_Rw,
-} db_file_mode_flag;
-
-// typedef enum gbSeekWhenceType
+// typedef u32 db_file_mode;
+// typedef enum db_file_mode_flag
 // {
-//     gbSeekWhence_Begin   = 0,
-//     gbSeekWhence_Current = 1,
-//     gbSeekWhence_End     = 2,
-// } gbSeekWhenceType;
-
-typedef enum db_file_error
-{
-    db_file_error_None,
-    db_file_error_Invalid,
-    db_file_error_InvalidFilename,
-    db_file_error_Exists,
-    db_file_error_NotExists,
-    db_file_error_Permission,
-    db_file_error_TruncationFailure,
-} db_file_error;
-
-typedef union db_file_descriptor {
-    void     *p;
-    intptr_t  i;
-    uintptr_t u;
-} db_file_descriptor;
-
-typedef struct gbFileOperations gbFileOperations;
-
-#define DB_FILE_OPEN_PROC(name)                                                                                        \
-    name(db_file_descriptor *fd, gbFileOperations *ops, gbFileMode mode, char const *filename)
-#define DB_FILE_READ_AT_PROC(name)                                                                                     \
-    b32 name(db_file_descriptor fd, void *buffer, isize size, i64 offset, isize *bytes_read)
-#define DB_FILE_WRITE_AT_PROC(name)                                                                                    \
-    b32 name(db_file_descriptor fd, void const *buffer, isize size, i64 offset, isize *bytes_written)
-#define DB_FILE_SEEK_PROC(name) b32 name(db_file_descriptor fd, i64 offset, gbSeekWhenceType whence, i64 *new_offset)
-#define DB_FILE_CLOSE_PROC(name) void name(db_file_descriptor fd)
-
-typedef DB_FILE_OPEN_PROC(db_file_open_proc);
-typedef DB_FILE_READ_AT_PROC(db_file_read_proc);
-typedef DB_FILE_WRITE_AT_PROC(db_file_write_proc);
-typedef DB_FILE_SEEK_PROC(db_file_seek_proc);
-typedef DB_FILE_CLOSE_PROC(db_file_close_proc);
-
-struct db_file_operations
-{
-    db_file_read_proc  *read_at;
-    db_file_write_proc *write_at;
-    db_file_seek_proc  *seek;
-    db_file_close_proc *close;
-};
-
-typedef u64 db_file_time;
-
-typedef struct db_file
-{
-    db_file_operations ops;
-    db_file_descriptor fd;
-    char const        *filename;
-    db_file_time       last_write_time;
-    // gbDirInfo *   dir_info; // TODO(bill): Get directory info
-} db_file_;
-
-// TODO(bill): gbAsyncFile
-
-typedef enum gbFileStandardType
-{
-    gbFileStandard_Input,
-    gbFileStandard_Output,
-    gbFileStandard_Error,
-
-    gbFileStandard_Count,
-} gbFileStandardType;
-
-GB_DEF gbFile *const gb_file_get_standard(gbFileStandardType std);
-
-GB_DEF gbFileError gb_file_create(gbFile *file, char const *filename);
-GB_DEF gbFileError gb_file_open(gbFile *file, char const *filename);
-GB_DEF gbFileError gb_file_open_mode(gbFile *file, gbFileMode mode, char const *filename);
-GB_DEF gbFileError gb_file_new(gbFile *file, gbFileDescriptor fd, gbFileOperations ops, char const *filename);
-GB_DEF b32         gb_file_read_at_check(gbFile *file, void *buffer, isize size, i64 offset, isize *bytes_read);
-GB_DEF b32 gb_file_write_at_check(gbFile *file, void const *buffer, isize size, i64 offset, isize *bytes_written);
-GB_DEF b32 gb_file_read_at(gbFile *file, void *buffer, isize size, i64 offset);
-GB_DEF b32 gb_file_write_at(gbFile *file, void const *buffer, isize size, i64 offset);
-GB_DEF i64 gb_file_seek(gbFile *file, i64 offset);
-GB_DEF i64 gb_file_seek_to_end(gbFile *file);
-GB_DEF i64 gb_file_skip(gbFile *file, i64 bytes); // NOTE(bill): Skips a certain amount of bytes
-GB_DEF i64 gb_file_tell(gbFile *file);
-GB_DEF gbFileError gb_file_close(gbFile *file);
-GB_DEF b32         gb_file_read(gbFile *file, void *buffer, isize size);
-GB_DEF b32         gb_file_write(gbFile *file, void const *buffer, isize size);
-GB_DEF i64         gb_file_size(gbFile *file);
-GB_DEF char const *gb_file_name(gbFile *file);
-GB_DEF gbFileError gb_file_truncate(gbFile *file, i64 size);
-GB_DEF b32         gb_file_has_changed(gbFile *file); // NOTE(bill): Changed since lasted checked
-// TODO(bill):
-// gbFileError gb_file_temp(gbFile *file);
+//     db_file_mode_Read   = bit0,
+//     db_file_mode_Write  = bit1,
+//     db_file_mode_Append = bit2,
+//     db_file_mode_Rw     = bit3,
 //
-
-typedef struct gbFileContents
-{
-    gbAllocator allocator;
-    void       *data;
-    isize       size;
-} gbFileContents;
-
-GB_DEF gbFileContents gb_file_read_contents(gbAllocator a, b32 zero_terminate, char const *filepath);
-GB_DEF void           gb_file_free_contents(gbFileContents *fc);
-
-// TODO(bill): Should these have different na,es as they do not take in a gbFile * ???
-GB_DEF b32        gb_file_exists(char const *filepath);
-GB_DEF gbFileTime gb_file_last_write_time(char const *filepath);
-GB_DEF b32        gb_file_copy(char const *existing_filename, char const *new_filename, b32 fail_if_exists);
-GB_DEF b32        gb_file_move(char const *existing_filename, char const *new_filename);
-GB_DEF b32        gb_file_remove(char const *filename);
-
-#ifndef GB_PATH_SEPARATOR
-#if defined(GB_SYSTEM_WINDOWS)
-#define GB_PATH_SEPARATOR '\\'
-#else
-#define GB_PATH_SEPARATOR '/'
-#endif
-#endif
-
-GB_DEF b32         gb_path_is_absolute(char const *path);
-GB_DEF b32         gb_path_is_relative(char const *path);
-GB_DEF b32         gb_path_is_root(char const *path);
-GB_DEF char const *gb_path_base_name(char const *path);
-GB_DEF char const *gb_path_extension(char const *path);
-GB_DEF char       *gb_path_get_full_name(gbAllocator a, char const *path);
-
-b8 db_file_load(db_arena *arena, const char *file_name);
-
+//     db_file_mode_Modes = db_file_mode_Read | db_file_mode_Write | db_file_mode_Append | db_file_mode_Rw,
+// } db_file_mode_flag;
+//
+// // typedef enum gbSeekWhenceType
+// // {
+// //     gbSeekWhence_Begin   = 0,
+// //     gbSeekWhence_Current = 1,
+// //     gbSeekWhence_End     = 2,
+// // } gbSeekWhenceType;
+//
+// typedef enum db_file_error
+// {
+//     db_file_error_None,
+//     db_file_error_Invalid,
+//     db_file_error_InvalidFilename,
+//     db_file_error_Exists,
+//     db_file_error_NotExists,
+//     db_file_error_Permission,
+//     db_file_error_TruncationFailure,
+// } db_file_error;
+//
+// typedef union db_file_descriptor {
+//     void     *p;
+//     intptr_t  i;
+//     uintptr_t u;
+// } db_file_descriptor;
+//
+// typedef struct gbFileOperations gbFileOperations;
+//
+// #define DB_FILE_OPEN_PROC(name) \
+//     name(db_file_descriptor *fd, gbFileOperations *ops, gbFileMode mode, char const *filename)
+// #define DB_FILE_READ_AT_PROC(name) \
+//     b32 name(db_file_descriptor fd, void *buffer, isize size, i64 offset, isize *bytes_read)
+// #define DB_FILE_WRITE_AT_PROC(name) \
+//     b32 name(db_file_descriptor fd, void const *buffer, isize size, i64 offset, isize *bytes_written)
+// #define DB_FILE_SEEK_PROC(name) b32 name(db_file_descriptor fd, i64 offset, gbSeekWhenceType whence, i64 *new_offset)
+// #define DB_FILE_CLOSE_PROC(name) void name(db_file_descriptor fd)
+//
+// typedef DB_FILE_OPEN_PROC(db_file_open_proc);
+// typedef DB_FILE_READ_AT_PROC(db_file_read_proc);
+// typedef DB_FILE_WRITE_AT_PROC(db_file_write_proc);
+// typedef DB_FILE_SEEK_PROC(db_file_seek_proc);
+// typedef DB_FILE_CLOSE_PROC(db_file_close_proc);
+//
+// struct db_file_operations
+// {
+//     db_file_read_proc  *read_at;
+//     db_file_write_proc *write_at;
+//     db_file_seek_proc  *seek;
+//     db_file_close_proc *close;
+// };
+//
+// typedef u64 db_file_time;
+//
+// typedef struct db_file
+// {
+//     db_file_operations ops;
+//     db_file_descriptor fd;
+//     char const        *filename;
+//     db_file_time       last_write_time;
+//     // gbDirInfo *   dir_info; // TODO(bill): Get directory info
+// } db_file_;
+//
+// // TODO(bill): gbAsyncFile
+//
+// typedef enum gbFileStandardType
+// {
+//     gbFileStandard_Input,
+//     gbFileStandard_Output,
+//     gbFileStandard_Error,
+//
+//     gbFileStandard_Count,
+// } gbFileStandardType;
+//
+// GB_DEF gbFile *const gb_file_get_standard(gbFileStandardType std);
+//
+// GB_DEF gbFileError gb_file_create(gbFile *file, char const *filename);
+// GB_DEF gbFileError gb_file_open(gbFile *file, char const *filename);
+// GB_DEF gbFileError gb_file_open_mode(gbFile *file, gbFileMode mode, char const *filename);
+// GB_DEF gbFileError gb_file_new(gbFile *file, gbFileDescriptor fd, gbFileOperations ops, char const *filename);
+// GB_DEF b32         gb_file_read_at_check(gbFile *file, void *buffer, isize size, i64 offset, isize *bytes_read);
+// GB_DEF b32 gb_file_write_at_check(gbFile *file, void const *buffer, isize size, i64 offset, isize *bytes_written);
+// GB_DEF b32 gb_file_read_at(gbFile *file, void *buffer, isize size, i64 offset);
+// GB_DEF b32 gb_file_write_at(gbFile *file, void const *buffer, isize size, i64 offset);
+// GB_DEF i64 gb_file_seek(gbFile *file, i64 offset);
+// GB_DEF i64 gb_file_seek_to_end(gbFile *file);
+// GB_DEF i64 gb_file_skip(gbFile *file, i64 bytes); // NOTE(bill): Skips a certain amount of bytes
+// GB_DEF i64 gb_file_tell(gbFile *file);
+// GB_DEF gbFileError gb_file_close(gbFile *file);
+// GB_DEF b32         gb_file_read(gbFile *file, void *buffer, isize size);
+// GB_DEF b32         gb_file_write(gbFile *file, void const *buffer, isize size);
+// GB_DEF i64         gb_file_size(gbFile *file);
+// GB_DEF char const *gb_file_name(gbFile *file);
+// GB_DEF gbFileError gb_file_truncate(gbFile *file, i64 size);
+// GB_DEF b32         gb_file_has_changed(gbFile *file); // NOTE(bill): Changed since lasted checked
+// // TODO(bill):
+// // gbFileError gb_file_temp(gbFile *file);
+// //
+//
+// typedef struct gbFileContents
+// {
+//     gbAllocator allocator;
+//     void       *data;
+//     isize       size;
+// } gbFileContents;
+//
+// GB_DEF gbFileContents gb_file_read_contents(gbAllocator a, b32 zero_terminate, char const *filepath);
+// GB_DEF void           gb_file_free_contents(gbFileContents *fc);
+//
+// // TODO(bill): Should these have different na,es as they do not take in a gbFile * ???
+// GB_DEF b32        gb_file_exists(char const *filepath);
+// GB_DEF gbFileTime gb_file_last_write_time(char const *filepath);
+// GB_DEF b32        gb_file_copy(char const *existing_filename, char const *new_filename, b32 fail_if_exists);
+// GB_DEF b32        gb_file_move(char const *existing_filename, char const *new_filename);
+// GB_DEF b32        gb_file_remove(char const *filename);
+//
+// #ifndef GB_PATH_SEPARATOR
+// #if defined(GB_SYSTEM_WINDOWS)
+// #define GB_PATH_SEPARATOR '\\'
+// #else
+// #define GB_PATH_SEPARATOR '/'
+// #endif
+// #endif
+//
+// GB_DEF b32         gb_path_is_absolute(char const *path);
+// GB_DEF b32         gb_path_is_relative(char const *path);
+// GB_DEF b32         gb_path_is_root(char const *path);
+// GB_DEF char const *gb_path_base_name(char const *path);
+// GB_DEF char const *gb_path_extension(char const *path);
+// GB_DEF char       *gb_path_get_full_name(gbAllocator a, char const *path);
+//
+// b8 db_file_load(db_arena *arena, const char *file_name);
+//
 /*
 ▗▄▄▄▖▗▖  ▗▖▗▄▄▖ ▗▖   ▗▄▄▄▖▗▖  ▗▖▗▄▄▄▖▗▖  ▗▖▗▄▄▄▖▗▄▖▗▄▄▄▖▗▄▄▄▖ ▗▄▖ ▗▖  ▗▖
   █  ▐▛▚▞▜▌▐▌ ▐▌▐▌   ▐▌   ▐▛▚▞▜▌▐▌   ▐▛▚▖▐▌  █ ▐▌ ▐▌ █    █  ▐▌ ▐▌▐▛▚▖▐▌
@@ -2051,6 +2051,7 @@ b8 db_strings_are_equal(db_string const *lhs, db_string const *rhs)
 
 s32 db_file_size()
 {
+    return 0;
 }
 
 b8 db_file_load(db_arena *arena, const char *file_name)
