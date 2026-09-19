@@ -595,9 +595,6 @@ keys translate_keycode(u32 xk_keycode)
         ASSERT(expr != 0);                                                                                             \
     }
 //
-#include <wayland-client-protocol.h>
-#include <wayland-client.h>
-
 #include "../platform/wayland/xdg-decoration-unstable-v1.h"
 #include "../platform/wayland/xdg-shell-client-protocol.h"
 
