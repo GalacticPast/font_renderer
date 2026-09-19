@@ -1,5 +1,8 @@
 #define DB_IMPLEMENTATION
+#define DB_MATH_IMPLEMENTATION
+
 #include "db.h"
+#include "db_math.h"
 #include "input.h"
 #include "platform/platform.h"
 
@@ -20,6 +23,24 @@ struct vertex_buffer_object
     GLuint id;
 } typedef VBO;
 
+struct element_buffer_object
+{
+    GLuint id;
+} typedef EBO;
+
+typedef struct camera
+{
+    db_vector3 position;
+    db_vector3 orientation;
+    db_vector3 up;
+
+    f32 speed;
+    f32 sensitivity;
+    f32 yaw;
+    f32 pitch;
+    f32 fov;
+} camera;
+
 void vao_create(VAO *vao_object);
 void vao_bind(VAO *vao_object);
 void vao_link_vbo_attribs(VAO *vao_object, VBO *vbo, GLuint layout, GLuint num_components, GLenum type,
@@ -32,10 +53,20 @@ void vbo_bind(VBO *vbo_object);
 void vbo_unbind();
 void vbo_delete(VBO *vbo_object);
 
-void shader_create(db_arena *arena, shader *shader);
+void ebo_create(EBO *ebo_object, GLuint *indices, GLsizeiptr size);
+void ebo_bind(EBO *ebo_object);
+void ebo_unbind();
+void ebo_delete(EBO *ebo_object);
+
+b8 shader_create(db_arena *arena, shader *shader);
 
 void shader_use(shader *shader);
 void shader_destroy(shader *shader);
+
+void camera_set_matrix(camera *camera, shader *shader, f32 near_plane, f32 far_plane);
+
+static inline db_matrix4 mat4_perspective(f32 fov_radians, f32 aspect_ratio, f32 near_clip, f32 far_clip);
+static inline db_matrix4 mat4_look_at(db_vector3 position, db_vector3 target, db_vector3 up);
 
 b8 opengl_startup(db_arena *main_arena)
 {
@@ -75,6 +106,36 @@ int main()
     if (!success)
         return 0;
 
+    camera camera      = {};
+    camera.position    = db_vector3_make(0.0f, 0.0f, 3.0f);
+    camera.orientation = db_vector3_make(0.0f, 0.0f, -1.0f);
+    camera.up          = db_vector3_make(0.0f, 1.0f, 0.0f);
+    camera.yaw         = -90.0f;
+    camera.pitch       = 0.0f;
+    camera.fov         = 45.0f;
+    camera.sensitivity = 0.1f; // change this value to your liking
+
+    shader shader = {};
+    b8     a      = shader_create(&main_arena, &shader);
+
+    if (!a)
+        return false;
+
+    VAO vao;
+    VBO vbo;
+    EBO ebo;
+
+    vao_bind(&vao);
+
+    vbo_create(&vbo, vertices, sizeof(vertices));
+    ebo_create(&ebo, indices, sizeof(indices));
+
+    vao_link_vbo_attribs(&vao, &vbo, 0, 3, GL_FLOAT, 8 * sizeof(f32), (void *)0);
+    vao_link_vbo_attribs(&vao, &vbo, 1, 3, GL_FLOAT, 8 * sizeof(f32), (void *)(3 * sizeof(f32)));
+    vao_link_vbo_attribs(&vao, &vbo, 2, 2, GL_FLOAT, 8 * sizeof(f32), (void *)(6 * sizeof(f32)));
+
+    vao_unbind();
+
     while (true)
     {
         platform_pump_messages();
@@ -83,8 +144,17 @@ int main()
 
         glClear(GL_COLOR_BUFFER_BIT);
 
+        shader_use(&shader);
+
+        camera_set_matrix(&camera, &shader, 0.1f, 100.0f);
+
+        vao_bind(&vao);
+
+        glDrawElements(GL_TRIANGLES, sizeof(indices) / sizeof(int), GL_UNSIGNED_INT, 0);
+
         platform_swap_buffers();
     }
+    shader_destroy(&shader);
 }
 
 void vao_create(VAO *vao_object)
@@ -135,24 +205,49 @@ void vbo_delete(VBO *vbo_object)
     glDeleteBuffers(1, &vbo_object->id);
 }
 
-void get_shaders(db_string *vertex_shader_source, db_string *fragment_shader_source)
+void ebo_create(EBO *ebo_object, GLuint *indices, GLsizeiptr size)
 {
+
+    glGenBuffers(1, &ebo_object->id);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo_object->id);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, size, indices, GL_STATIC_DRAW);
 }
 
-void shader_create(db_arena *arena, shader *shader)
+void ebo_bind(EBO *ebo_object)
+{
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo_object->id);
+}
+void ebo_unbind()
+{
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+}
+void ebo_delete(EBO *ebo_object)
+{
+    glDeleteBuffers(1, &ebo_object->id);
+}
+
+b8 shader_create(db_arena *arena, shader *shader)
 {
     printf("Creating vertex and fragment shaders\n");
-    db_string vertex_shader_source   = db_string_make(arena, "vertex.glsl");
-    db_string fragment_shader_source = db_string_make(arena, "fragment.glsl");
 
-    get_shaders(&vertex_shader_source, &fragment_shader_source);
+    db_file_contents vertex_shader_source = db_file_read_contents(arena, 1, "../assets/shaders/vertex.glsl");
+    if (vertex_shader_source.size == 0)
+    {
+        printf("shader copying error\n");
+        return false;
+    }
+    db_file_contents fragment_shader_source = db_file_read_contents(arena, 1, "../assets/shaders/fragment.glsl");
+    if (fragment_shader_source.size == 0)
+    {
+        printf("shader copying error\n");
+        return false;
+    }
 
     printf("Compiling vertex shader\n");
     u32 vertex_shader = glCreateShader(GL_VERTEX_SHADER);
 
-    const char *vert_c_str = db_string_get_cstr(arena, &vertex_shader_source);
-
-    glShaderSource(vertex_shader, 1, &vert_c_str, NULL);
+    const char *const vert_src = vertex_shader_source.data;
+    glShaderSource(vertex_shader, 1, &vert_src, NULL);
     glCompileShader(vertex_shader);
 
     s32  success;
@@ -171,10 +266,10 @@ void shader_create(db_arena *arena, shader *shader)
 
     printf("Compiling fragment shader\n");
 
-    u32         fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
-    const char *frag_c_str      = db_string_get_cstr(arena, &fragment_shader_source);
+    u32 fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
 
-    glShaderSource(fragment_shader, 1, &frag_c_str, NULL);
+    const char *const frag_src = fragment_shader_source.data;
+    glShaderSource(fragment_shader, 1, &frag_src, NULL);
     glCompileShader(fragment_shader);
 
     glGetShaderiv(fragment_shader, GL_COMPILE_STATUS, &success);
@@ -206,6 +301,7 @@ void shader_create(db_arena *arena, shader *shader)
     glDeleteShader(fragment_shader);
 
     printf("Succsefully created vertex and fragment shaders\n");
+    return true;
 }
 
 void shader_use(shader *shader)
@@ -215,4 +311,65 @@ void shader_use(shader *shader)
 void shader_destroy(shader *shader)
 {
     glDeleteProgram(shader->program);
+}
+
+static inline db_matrix4 mat4_perspective(f32 fov_radians, f32 aspect_ratio, f32 near_clip, f32 far_clip)
+{
+    f32        half_tan_fov = tanf(fov_radians * 0.5f);
+    db_matrix4 out_matrix   = {0};
+    out_matrix.data[0]      = 1.0f / (aspect_ratio * half_tan_fov);
+    out_matrix.data[5]      = 1.0f / half_tan_fov;
+    out_matrix.data[10]     = -((far_clip + near_clip) / (far_clip - near_clip));
+    out_matrix.data[11]     = -1.0f;
+    out_matrix.data[14]     = -((2.0f * far_clip * near_clip) / (far_clip - near_clip));
+    return out_matrix;
+}
+
+static inline db_matrix4 mat4_look_at(db_vector3 position, db_vector3 target, db_vector3 up)
+{
+    db_matrix4 out_matrix;
+    db_vector3 z_axis;
+    z_axis.x = target.x - position.x;
+    z_axis.y = target.y - position.y;
+    z_axis.z = target.z - position.z;
+
+    z_axis            = db_vector3_normalize(z_axis);
+    db_vector3 x_axis = db_vector3_normalize(db_vector3_cross(z_axis, up));
+    db_vector3 y_axis = db_vector3_cross(x_axis, z_axis);
+
+    out_matrix.data[0]  = x_axis.x;
+    out_matrix.data[1]  = y_axis.x;
+    out_matrix.data[2]  = -z_axis.x;
+    out_matrix.data[3]  = 0;
+    out_matrix.data[4]  = x_axis.y;
+    out_matrix.data[5]  = y_axis.y;
+    out_matrix.data[6]  = -z_axis.y;
+    out_matrix.data[7]  = 0;
+    out_matrix.data[8]  = x_axis.z;
+    out_matrix.data[9]  = y_axis.z;
+    out_matrix.data[10] = -z_axis.z;
+    out_matrix.data[11] = 0;
+    out_matrix.data[12] = -db_vector3_dot_multiplication(x_axis, position);
+    out_matrix.data[13] = -db_vector3_dot_multiplication(y_axis, position);
+    out_matrix.data[14] = db_vector3_dot_multiplication(z_axis, position);
+    out_matrix.data[15] = 1.0f;
+
+    return out_matrix;
+}
+
+void camera_set_matrix(camera *camera, shader *shader, f32 near_plane, f32 far_plane)
+{
+
+    u32 win_width, win_height;
+    platform_get_window_dimensions(&win_width, &win_height);
+
+    db_matrix4 projection =
+        mat4_perspective(db_to_radians(camera->fov), (f32)win_width / (f32)win_height, 0.1f, 100.0f);
+    u32 projection_loc = glGetUniformLocation(shader->program, "projection");
+
+    db_matrix4 view = mat4_look_at(camera->position, db_vector3_add(camera->position, camera->orientation), camera->up);
+    u32        view_loc = glGetUniformLocation(shader->program, "view");
+
+    glUniformMatrix4fv(view_loc, 1, GL_FALSE, view.data);
+    glUniformMatrix4fv(projection_loc, 1, GL_FALSE, projection.data);
 }
