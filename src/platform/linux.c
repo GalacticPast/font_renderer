@@ -1,7 +1,7 @@
 #include "../input.h"
 #include "platform.h"
 
-#include "../glad.h"
+#include "../../vendor/glad/glad.h"
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 //

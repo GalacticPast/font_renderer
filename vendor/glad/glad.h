@@ -95,7 +95,7 @@ GLAPI void glad_set_post_callback_gl(GLADcallback cb);
 
 GLAPI void glad_set_pre_callback(GLADcallback cb);
 GLAPI void glad_set_post_callback(GLADcallback cb);
-#include <KHR/khrplatform.h>
+#include "khrplatform.h"
 typedef unsigned int GLenum;
 typedef unsigned char GLboolean;
 typedef unsigned int GLbitfield;

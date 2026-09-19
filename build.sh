@@ -8,7 +8,7 @@ CC="clang"
 ASSEMBLY="slug"
 EXTENSION=""
 
-INCLUDES=""
+INCLUDES="-I../vendor/glad"
 # If raylib, uncomment the following line:
 # LINKER_FLAGS="-L./external/raylib/lib/windows/ -lraylib -lkernel32 -lgdi32 -luser32 -ladvapi32 -ltdh -lwinmm -lm"
 LINKER_FLAGS="-DDPLATFORM_LINUX -lGL -lEGL"
@@ -70,6 +70,7 @@ fi
 
 # Gather all .c files recursively
 SRC_FILES=$(find "$SRC" -type f -name '*.c')
+SRC_FILES="$SRC_FILES ./vendor/glad/glad.c"
 
 echo "Building ${ASSEMBLY}${EXTENSION}..."
 $CC $SRC_FILES $COMPILER_FLAGS -o "$BIN/$ASSEMBLY$EXTENSION" $INCLUDES $LINKER_FLAGS

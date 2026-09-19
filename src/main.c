@@ -3,7 +3,7 @@
 #include "input.h"
 #include "platform/platform.h"
 
-#include "glad.h"
+#include "../vendor/glad/glad.h"
 
 typedef struct shader
 {
