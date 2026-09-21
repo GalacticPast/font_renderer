@@ -775,7 +775,7 @@ db_file_error db_file_exists(char const *filepath);
 // well I have to change it later on
 FILE *db_file_open(char const *filepath, db_file_mode mode);
 
-db_file_contents db_file_read_contents(db_arena *a, b32 zero_terminate, char const *filepath);
+db_file_contents db_file_read_contents(db_arena *a, db_file_mode mode, b32 zero_terminate, char const *filepath);
 void             db_file_free_contents(db_file_contents *fc);
 
 #ifndef DB_PATH_SEPARATOR
@@ -2014,11 +2014,11 @@ FILE *db_file_open(char const *file_path, db_file_mode mode)
 #endif
 }
 
-db_file_contents db_file_read_contents(db_arena *a, b32 zero_terminate, char const *filepath)
+db_file_contents db_file_read_contents(db_arena *a, db_file_mode mode, b32 zero_terminate, char const *filepath)
 {
     db_file_contents contents = {};
 
-    FILE *f = db_file_open(filepath, db_file_mode_read);
+    FILE *f = db_file_open(filepath, mode);
     if (f == NULL)
     {
         return contents;
@@ -2040,7 +2040,10 @@ db_file_contents db_file_read_contents(db_arena *a, b32 zero_terminate, char con
         printf("Error reading bytes out of %s\n", filepath);
     }
     fclose(f);
-    ((char *)contents.data)[contents.size] = '\0';
+    if (zero_terminate)
+    {
+        ((char *)contents.data)[contents.size] = '\0';
+    }
     return contents;
 }
 

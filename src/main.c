@@ -1,32 +1,13 @@
 #define DB_IMPLEMENTATION
 #define DB_MATH_IMPLEMENTATION
+#define STB_TRUETYPE_IMPLEMENTATION
 
+#include "../vendor/stb/stb_truetype.h"
 #include "db.h"
 #include "db_math.h"
+#include "gl.h"
 #include "input.h"
 #include "platform/platform.h"
-
-#include "../vendor/glad/glad.h"
-
-typedef struct shader
-{
-    GLuint program;
-} shader;
-
-struct vertex_array_object
-{
-    GLuint id;
-} typedef VAO;
-
-struct vertex_buffer_object
-{
-    GLuint id;
-} typedef VBO;
-
-struct element_buffer_object
-{
-    GLuint id;
-} typedef EBO;
 
 typedef struct camera
 {
@@ -41,29 +22,9 @@ typedef struct camera
     f32 fov;
 } camera;
 
-void vao_create(VAO *vao_object);
-void vao_bind(VAO *vao_object);
-void vao_link_vbo_attribs(VAO *vao_object, VBO *vbo, GLuint layout, GLuint num_components, GLenum type,
-                          GLsizeiptr stride, void *offset);
-void vao_unbind();
-void vao_delete(VAO *vao_object);
-
-void vbo_create(VBO *vbo_object, GLfloat *vertices, GLsizeiptr size);
-void vbo_bind(VBO *vbo_object);
-void vbo_unbind();
-void vbo_delete(VBO *vbo_object);
-
-void ebo_create(EBO *ebo_object, GLuint *indices, GLsizeiptr size);
-void ebo_bind(EBO *ebo_object);
-void ebo_unbind();
-void ebo_delete(EBO *ebo_object);
-
-b8 shader_create(db_arena *arena, shader *shader);
-
-void shader_use(shader *shader);
-void shader_destroy(shader *shader);
-
 void camera_set_matrix(camera *camera, shader *shader, f32 near_plane, f32 far_plane);
+void update(db_arena *main_arena);
+void load_font(db_arena *arena);
 
 static inline db_matrix4 mat4_perspective(f32 fov_radians, f32 aspect_ratio, f32 near_clip, f32 far_clip);
 static inline db_matrix4 mat4_look_at(db_vector3 position, db_vector3 target, db_vector3 up);
@@ -136,9 +97,12 @@ int main()
 
     vao_unbind();
 
+    load_font(&main_arena);
+
     while (true)
     {
         platform_pump_messages();
+        update(&main_arena);
 
         glClearColor(0.5f, 0.5f, 0.0f, 1.0f);
 
@@ -155,162 +119,6 @@ int main()
         platform_swap_buffers();
     }
     shader_destroy(&shader);
-}
-
-void vao_create(VAO *vao_object)
-{
-    glGenVertexArrays(1, &vao_object->id);
-}
-void vao_link_vbo_attribs(VAO *vao_object, VBO *vbo, GLuint layout, GLuint num_components, GLenum type,
-                          GLsizeiptr stride, void *offset)
-{
-    vbo_bind(vbo);
-    glVertexAttribPointer(layout, num_components, type, GL_FALSE, stride, offset);
-    glEnableVertexAttribArray(layout);
-    vbo_unbind();
-}
-
-void vao_bind(VAO *vao_object)
-{
-    glBindVertexArray(vao_object->id);
-}
-
-void vao_unbind()
-{
-    glBindVertexArray(0);
-}
-void vao_delete(VAO *vao_object)
-{
-    glDeleteVertexArrays(1, &vao_object->id);
-}
-
-void vbo_create(VBO *vbo_object, GLfloat *vertices, GLsizeiptr size)
-{
-    glGenBuffers(1, &vbo_object->id);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo_object->id);
-    glBufferData(GL_ARRAY_BUFFER, size, vertices, GL_STATIC_DRAW);
-}
-
-void vbo_bind(VBO *vbo_object)
-{
-    glBindBuffer(GL_ARRAY_BUFFER, vbo_object->id);
-}
-
-void vbo_unbind()
-{
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-}
-void vbo_delete(VBO *vbo_object)
-{
-    glDeleteBuffers(1, &vbo_object->id);
-}
-
-void ebo_create(EBO *ebo_object, GLuint *indices, GLsizeiptr size)
-{
-
-    glGenBuffers(1, &ebo_object->id);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo_object->id);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, size, indices, GL_STATIC_DRAW);
-}
-
-void ebo_bind(EBO *ebo_object)
-{
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo_object->id);
-}
-void ebo_unbind()
-{
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
-}
-void ebo_delete(EBO *ebo_object)
-{
-    glDeleteBuffers(1, &ebo_object->id);
-}
-
-b8 shader_create(db_arena *arena, shader *shader)
-{
-    printf("Creating vertex and fragment shaders\n");
-
-    db_file_contents vertex_shader_source = db_file_read_contents(arena, 1, "../assets/shaders/vertex.glsl");
-    if (vertex_shader_source.size == 0)
-    {
-        printf("shader copying error\n");
-        return false;
-    }
-    db_file_contents fragment_shader_source = db_file_read_contents(arena, 1, "../assets/shaders/fragment.glsl");
-    if (fragment_shader_source.size == 0)
-    {
-        printf("shader copying error\n");
-        return false;
-    }
-
-    printf("Compiling vertex shader\n");
-    u32 vertex_shader = glCreateShader(GL_VERTEX_SHADER);
-
-    const char *const vert_src = vertex_shader_source.data;
-    glShaderSource(vertex_shader, 1, &vert_src, NULL);
-    glCompileShader(vertex_shader);
-
-    s32  success;
-    char info_log[512];
-
-    glGetShaderiv(vertex_shader, GL_COMPILE_STATUS, &success);
-
-    if (!success)
-    {
-        glGetShaderInfoLog(vertex_shader, 512, NULL, info_log);
-
-        printf("Vertex shader compilation failed. %s\n", info_log);
-        DEBUG_BREAK;
-    }
-    printf("Vertex shader compiled succesfully\n");
-
-    printf("Compiling fragment shader\n");
-
-    u32 fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
-
-    const char *const frag_src = fragment_shader_source.data;
-    glShaderSource(fragment_shader, 1, &frag_src, NULL);
-    glCompileShader(fragment_shader);
-
-    glGetShaderiv(fragment_shader, GL_COMPILE_STATUS, &success);
-
-    if (!success)
-    {
-        glGetShaderInfoLog(fragment_shader, 512, NULL, info_log);
-
-        printf("Fragment shader compilation failed. %s\n", info_log);
-        DEBUG_BREAK;
-    }
-
-    shader->program = glCreateProgram();
-    glAttachShader(shader->program, vertex_shader);
-    glAttachShader(shader->program, fragment_shader);
-    glLinkProgram(shader->program);
-
-    glGetShaderiv(shader->program, GL_LINK_STATUS, &success);
-
-    if (!success)
-    {
-        glGetProgramInfoLog(shader->program, 512, NULL, info_log);
-
-        printf("Shader progam linking failed. %s\n", info_log);
-        DEBUG_BREAK;
-    }
-
-    glDeleteShader(vertex_shader);
-    glDeleteShader(fragment_shader);
-
-    printf("Succsefully created vertex and fragment shaders\n");
-    return true;
-}
-
-void shader_use(shader *shader)
-{
-    glUseProgram(shader->program);
-}
-void shader_destroy(shader *shader)
-{
-    glDeleteProgram(shader->program);
 }
 
 static inline db_matrix4 mat4_perspective(f32 fov_radians, f32 aspect_ratio, f32 near_clip, f32 far_clip)
@@ -372,4 +180,40 @@ void camera_set_matrix(camera *camera, shader *shader, f32 near_plane, f32 far_p
 
     glUniformMatrix4fv(view_loc, 1, GL_FALSE, view.data);
     glUniformMatrix4fv(projection_loc, 1, GL_FALSE, projection.data);
+}
+//@note:
+// this is temperory
+void update(db_arena *main_arena)
+{
+}
+
+typedef struct
+{
+    s_size size;
+    f32   *vertices;
+} glyph_data;
+
+void load_font(db_arena *arena)
+{
+    db_file_contents font_content =
+        db_file_read_contents(arena, db_file_mode_rb, 0, "../assets/font/Archivo-Regular.ttf");
+    ASSERT_WITH_MSG(font_content.size, "couldnt read the font.");
+    stbtt_fontinfo font_info = {};
+    b8             res       = stbtt_InitFont(&font_info, font_content.data, 0);
+    ASSERT_WITH_MSG(res, "font loeading failed");
+
+    // Just checking "B"
+    s32 glyph_index = stbtt_FindGlyphIndex(&font_info, (s32)'B');
+
+    stbtt_vertex *vertices      = NULL;
+    b32           vertices_size = stbtt_GetGlyphShape(&font_info, glyph_index, &vertices);
+
+    glyph_data g_data = {};
+
+    // for (int i = 0; i < vertices_size; i++)
+    // {
+    //     printf("type: %d, padding: %d, x: %d, y: %d, cx: %d, cy: %d, cx1: %d, cy1: %d \n", vertices[i].type,
+    //            vertices[i].padding, vertices[i].x, vertices[i].y, vertices[i].cx, vertices[i].cy, vertices[i].cx1,
+    //            vertices[i].cy1);
+    // }
 }
