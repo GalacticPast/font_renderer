@@ -187,10 +187,12 @@ void update(db_arena *main_arena)
 {
 }
 
+db_array_decl(contours, db_vector2);
+
 typedef struct
 {
-    s_size size;
-    f32   *vertices;
+    s_size            size;
+    db_array_contours contours;
 } glyph_data;
 
 void load_font(db_arena *arena)
@@ -210,10 +212,54 @@ void load_font(db_arena *arena)
 
     glyph_data g_data = {};
 
-    // for (int i = 0; i < vertices_size; i++)
+    g_data.contours       = db_array_contours_init(arena);
+    db_vector2 curr_point = db_vector2_zero();
+    for (int i = 0; i < vertices_size; i++)
+    {
+        printf("type: %d, padding: %d, x: %d, y: %d, cx: %d, cy: %d, cx1: %d, cy1: %d \n", vertices[i].type,
+               vertices[i].padding, vertices[i].x, vertices[i].y, vertices[i].cx, vertices[i].cy, vertices[i].cx1,
+               vertices[i].cy1);
+    }
+    for (int i = 0; i < vertices_size; i++)
+    {
+        switch (vertices[i].type)
+        {
+            case STBTT_vmove: {
+                curr_point.x = vertices[i].x;
+                curr_point.y = vertices[i].y;
+            }
+            break;
+            case STBTT_vline: {
+                db_vector2 p2  = db_vector2_make(vertices[i].x, vertices[i].y);
+                db_vector2 mid = db_vector2_make((p2.x + curr_point.x) * 0.5f, (p2.y + curr_point.y) * 0.5f);
+                db_array_contours_append(&g_data.contours, curr_point);
+                db_array_contours_append(&g_data.contours, mid);
+                db_array_contours_append(&g_data.contours, p2);
+                curr_point = p2;
+            }
+            break;
+            case STBTT_vcurve: {
+                db_vector2 p2        = db_vector2_make(vertices[i].x, vertices[i].y);
+                db_vector2 control_p = db_vector2_make(vertices[i].cx, vertices[i].cy);
+                db_array_contours_append(&g_data.contours, curr_point);
+                db_array_contours_append(&g_data.contours, control_p);
+                db_array_contours_append(&g_data.contours, p2);
+                curr_point = p2;
+            }
+            break;
+            case STBTT_vcubic: {
+            }
+            break;
+        }
+    }
+    //
+    // printf("\n\n\n");
+    // db_vector2 *iter = NULL;
+    // s32         i    = 0;
+    // db_array_for_each_ptr(g_data.contours, i, iter)
     // {
-    //     printf("type: %d, padding: %d, x: %d, y: %d, cx: %d, cy: %d, cx1: %d, cy1: %d \n", vertices[i].type,
-    //            vertices[i].padding, vertices[i].x, vertices[i].y, vertices[i].cx, vertices[i].cy, vertices[i].cx1,
-    //            vertices[i].cy1);
+    //     printf("x: %.2f, y: %.2f\n", iter->x, iter->y);
     // }
+
+    //@info: debug code
 }
