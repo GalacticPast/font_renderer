@@ -22,9 +22,18 @@ typedef struct camera
     f32 fov;
 } camera;
 
-void camera_set_matrix(camera *camera, shader *shader, f32 near_plane, f32 far_plane);
-void update(db_arena *main_arena);
-void load_font(db_arena *arena);
+db_array_decl(contours, db_vector2);
+db_array_decl(s32, s32);
+
+typedef struct
+{
+    db_array_s32      contours_start_indicies;
+    db_array_contours contours;
+} glyph_data;
+
+void       camera_set_matrix(camera *camera, shader *shader, f32 near_plane, f32 far_plane);
+void       update(db_arena *main_arena);
+glyph_data load_font(db_arena *arena);
 
 static inline db_matrix4 mat4_perspective(f32 fov_radians, f32 aspect_ratio, f32 near_clip, f32 far_clip);
 static inline db_matrix4 mat4_look_at(db_vector3 position, db_vector3 target, db_vector3 up);
@@ -67,7 +76,7 @@ int main()
     if (!success)
         return 0;
 
-    camera camera      = {};
+    camera camera      = {0};
     camera.position    = db_vector3_make(0.0f, 0.0f, 3.0f);
     camera.orientation = db_vector3_make(0.0f, 0.0f, -1.0f);
     camera.up          = db_vector3_make(0.0f, 1.0f, 0.0f);
@@ -76,7 +85,7 @@ int main()
     camera.fov         = 45.0f;
     camera.sensitivity = 0.1f; // change this value to your liking
 
-    shader shader = {};
+    shader shader = {0};
     b8     a      = shader_create(&main_arena, &shader);
 
     if (!a)
@@ -86,6 +95,7 @@ int main()
     VBO vbo;
     EBO ebo;
 
+    vao_create(&vao);
     vao_bind(&vao);
 
     vbo_create(&vbo, vertices, sizeof(vertices));
@@ -101,7 +111,8 @@ int main()
 
     while (true)
     {
-        platform_pump_messages();
+        if (!platform_pump_messages())
+            break;
         update(&main_arena);
 
         glClearColor(0.5f, 0.5f, 0.0f, 1.0f);
@@ -119,6 +130,7 @@ int main()
         platform_swap_buffers();
     }
     shader_destroy(&shader);
+    platform_shutdown();
 }
 
 static inline db_matrix4 mat4_perspective(f32 fov_radians, f32 aspect_ratio, f32 near_clip, f32 far_clip)
@@ -187,15 +199,7 @@ void update(db_arena *main_arena)
 {
 }
 
-db_array_decl(contours, db_vector2);
-
-typedef struct
-{
-    s_size            size;
-    db_array_contours contours;
-} glyph_data;
-
-void load_font(db_arena *arena)
+glyph_data load_font(db_arena *arena)
 {
     db_file_contents font_content =
         db_file_read_contents(arena, db_file_mode_rb, 0, "../assets/font/Archivo-Regular.ttf");
@@ -210,10 +214,13 @@ void load_font(db_arena *arena)
     stbtt_vertex *vertices      = NULL;
     b32           vertices_size = stbtt_GetGlyphShape(&font_info, glyph_index, &vertices);
 
-    glyph_data g_data = {};
+    glyph_data g_data = {0};
 
-    g_data.contours       = db_array_contours_init(arena);
+    g_data.contours                = db_array_contours_init(arena);
+    g_data.contours_start_indicies = db_array_s32_init(arena);
+
     db_vector2 curr_point = db_vector2_zero();
+
     for (int i = 0; i < vertices_size; i++)
     {
         printf("type: %d, padding: %d, x: %d, y: %d, cx: %d, cy: %d, cx1: %d, cy1: %d \n", vertices[i].type,
@@ -225,6 +232,7 @@ void load_font(db_arena *arena)
         switch (vertices[i].type)
         {
             case STBTT_vmove: {
+                db_array_s32_append(&g_data.contours_start_indicies, db_array_contours_length(&g_data.contours));
                 curr_point.x = vertices[i].x;
                 curr_point.y = vertices[i].y;
             }
@@ -252,14 +260,24 @@ void load_font(db_arena *arena)
             break;
         }
     }
-    //
-    // printf("\n\n\n");
-    // db_vector2 *iter = NULL;
-    // s32         i    = 0;
-    // db_array_for_each_ptr(g_data.contours, i, iter)
-    // {
-    //     printf("x: %.2f, y: %.2f\n", iter->x, iter->y);
-    // }
+
+    printf("\n\n\n");
+
+    s32 s32_iter = 0;
+    s32 i        = 0;
+    db_array_for_each(g_data.contours_start_indicies, i, s32_iter)
+    {
+        printf("%d\n", s32_iter);
+    }
+
+    db_vector2 *iter = NULL;
+    i                = 0;
+    db_array_for_each_ptr(g_data.contours, i, iter)
+    {
+        printf("x: %.2f, y: %.2f\n", iter->x, iter->y);
+    }
 
     //@info: debug code
+
+    return g_data;
 }

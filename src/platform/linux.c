@@ -368,8 +368,6 @@ keys translate_keycode(u32 xk_keycode)
             return KEY_SELECT;
         case XK_Print:
             return KEY_PRINT;
-        case XK_Execute:
-            return KEY_EXECUTE;
         // case XK_snapshot: return KEY_SNAPSHOT; // not supported
         case XK_Insert:
             return KEY_INSERT;

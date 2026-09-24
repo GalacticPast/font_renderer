@@ -1975,7 +1975,6 @@ b8 db_strings_are_equal(db_string const *lhs, db_string const *rhs)
 
 FILE *db_file_open(char const *file_path, db_file_mode mode)
 {
-#ifdef DB_PLATFORM_LINUX
     char const *f_os_mode = NULL;
 
     switch (mode & db_file_mode_modes)
@@ -2003,15 +2002,17 @@ FILE *db_file_open(char const *file_path, db_file_mode mode)
             return NULL;
     }
 
+#if defined(DB_PLATFORM_LINUX)
     FILE *f = fopen(file_path, f_os_mode);
+#elif defined(DB_PLATFORM_WINDOWS)
+    FILE   *f   = NULL;
+    errno_t err = fopen_s(&f, file_path, f_os_mode);
+#endif
     if (!f)
     {
         perror("db_file_open failed");
     }
     return f;
-#else
-    return NULL;
-#endif
 }
 
 db_file_contents db_file_read_contents(db_arena *a, db_file_mode mode, b32 zero_terminate, char const *filepath)

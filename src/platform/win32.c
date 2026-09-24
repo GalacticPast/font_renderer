@@ -1,17 +1,11 @@
-#ifdef PLATFORM_WINDOWS
+#ifdef _WIN32
 
-#include "core/event.hpp"
-#include "core/input.hpp"
-#include "platform.hpp"
-
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#include <windowsx.h> // param input extraction
-
-#include <fstream>
-#include <sstream>
-
-#include "opengl/opengl_context.hpp"
-
+#include <windowsx.h>
+#include "../../vendor/glad/glad.h"
+#include "../input.h"
+#include "platform.h"
 static f64 clock_frequency;
 static LARGE_INTEGER start_time;
 
@@ -26,12 +20,17 @@ typedef struct internal_state
     s32 height;
 } internal_state;
 
+static internal_state storage;
+static internal_state *state = &storage;
+static b8 running;
+static b8 input_ready;
+static b8 init_openGL(void);
+
 // Clock
 
-static bool opengl_initialized = false;
+static b8 opengl_initialized = false;
 
 LRESULT CALLBACK win32_process_message(HWND hwnd, u32 msg, WPARAM w_param, LPARAM l_param);
-keys translate_keycode(u32 key);
 
 void clock_setup(void)
 {
@@ -50,11 +49,11 @@ LRESULT CALLBACK win32_process_message(HWND hwnd, u32 msg, WPARAM w_param, LPARA
         return 1;
     case WM_CLOSE:
     {
-        event_context context = {0};
-        event_fire(EVENT_CODE_APPLICATION_QUIT, nullptr, context);
+        running = false;
         return 0;
     }
     case WM_DESTROY:
+        running = false;
         PostQuitMessage(0);
         return 0;
     case WM_SIZE:
@@ -65,10 +64,9 @@ LRESULT CALLBACK win32_process_message(HWND hwnd, u32 msg, WPARAM w_param, LPARA
         u32 width = r.right - r.left;
         u32 height = r.bottom - r.top;
 
-        event_context context = {0};
-        context.data.u32[0] = width;
-        context.data.u32[1] = height;
-        event_fire(EVENT_CODE_RESIZED, nullptr, context);
+        state->width = width;
+        state->height = height;
+        if (opengl_initialized) glViewport(0, 0, width, height);
     }
     break;
     case WM_KEYDOWN:
@@ -77,10 +75,10 @@ LRESULT CALLBACK win32_process_message(HWND hwnd, u32 msg, WPARAM w_param, LPARA
     case WM_SYSKEYUP:
     {
         // Key pressed/released
-        bool pressed = (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN);
+        b8 pressed = (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN);
         keys key = (keys)w_param;
 
-        input_process_key(key, pressed);
+        if (input_ready && w_param < 256) input_process_key(key, pressed);
     }
     break;
     case WM_MOUSEMOVE:
@@ -89,7 +87,7 @@ LRESULT CALLBACK win32_process_message(HWND hwnd, u32 msg, WPARAM w_param, LPARA
         s16 x_pos = GET_X_LPARAM(l_param);
         s16 y_pos = GET_Y_LPARAM(l_param);
 
-        input_process_mouse_move(x_pos, y_pos);
+        if (input_ready) input_process_mouse_move(x_pos, y_pos);
     }
     break;
     case WM_MOUSEWHEEL:
@@ -110,11 +108,11 @@ LRESULT CALLBACK win32_process_message(HWND hwnd, u32 msg, WPARAM w_param, LPARA
     return DefWindowProcA(hwnd, msg, w_param, l_param);
 }
 
-bool platform_startup(platform_context *plat_state, std::string application_name, s32 x, s32 y, s32 width, s32 height)
+b8 platform_startup(db_arena *arena, char *application_name, s32 x, s32 y, s32 width, s32 height)
 {
-    DINFO("initializing windows platform startup...");
-    plat_state->internal_state = malloc(sizeof(internal_state));
-    internal_state *state = (internal_state *)plat_state->internal_state;
+    printf("Initializing Windows platform...\n");
+    state->width = width;
+    state->height = height;
 
     state->h_instance = GetModuleHandleA(0);
 
@@ -124,7 +122,7 @@ bool platform_startup(platform_context *plat_state, std::string application_name
     HICON icon = LoadIcon(state->h_instance, IDI_APPLICATION);
     WNDCLASSA wc;
     memset(&wc, 0, sizeof(wc));
-    wc.style = CS_DBLCLKS; // Get double-clicks
+    wc.style = CS_DBLCLKS | CS_OWNDC; // Get double-clicks
     wc.lpfnWndProc = win32_process_message;
     wc.cbClsExtra = 0;
     wc.cbWndExtra = 0;
@@ -173,12 +171,11 @@ bool platform_startup(platform_context *plat_state, std::string application_name
     window_width += border_rect.right - border_rect.left;
     window_height += border_rect.bottom - border_rect.top;
 
-    HWND handle = CreateWindowExA(window_ex_style, "learning_opengl_class", application_name.c_str(), window_style, window_x, window_y, window_width, window_height, 0, 0, state->h_instance, 0);
+    HWND handle = CreateWindowExA(window_ex_style, "learning_opengl_class", application_name, window_style, window_x, window_y, window_width, window_height, 0, 0, state->h_instance, 0);
 
     if (handle == 0)
     {
         MessageBoxA(NULL, "Window creation failed!", "ERROR!", MB_ICONEXCLAMATION | MB_OK);
-        DFATAL("Window creation failed!");
         return false;
     }
     else
@@ -186,15 +183,20 @@ bool platform_startup(platform_context *plat_state, std::string application_name
         state->hwnd = handle;
     }
 
-    // Show the window
+    if (!init_openGL())
+    {
+        platform_shutdown();
+        return false;
+    }
+    running = true;
     return true;
 }
-void platform_shutdown(platform_context *plat_state)
+void platform_shutdown(void)
 {
-    internal_state *state = (internal_state *)plat_state->internal_state;
 
     if (state->hwnd)
     {
+        wglMakeCurrent(NULL, NULL);
         wglDeleteContext(state->opengl_context);
         ReleaseDC(state->hwnd, state->hdc);
         DestroyWindow(state->hwnd);
@@ -202,34 +204,34 @@ void platform_shutdown(platform_context *plat_state)
         state->hwnd = 0;
     }
 }
-bool platform_pump_messages(platform_context *plat_state)
+b8 platform_pump_messages(void)
 {
+    input_ready = true;
     MSG message;
     while (PeekMessageA(&message, NULL, 0, 0, PM_REMOVE))
     {
+        if (message.message == WM_QUIT) running = false;
         TranslateMessage(&message);
         DispatchMessageA(&message);
     }
 
-    return true;
+    return running;
 }
 
-bool init_openGL(platform_context *plat_state)
+static b8 init_openGL(void)
 {
-    DINFO("Initializing OpenGL...");
-
-    internal_state *state = (internal_state *)plat_state->internal_state;
+    printf("Initializing OpenGL...\n");
 
     state->hdc = GetDC(state->hwnd);
     if (state->hdc == NULL)
     {
         MessageBox(NULL, ("Failed to get window's device context!"), "DERROR", MB_ICONERROR);
-        DFATAL("Failed to get window's device context!");
         return false;
     }
 
     PIXELFORMATDESCRIPTOR pixel_format_des = {};
     pixel_format_des.nSize = sizeof(pixel_format_des);
+    pixel_format_des.nVersion = 1;
     pixel_format_des.dwFlags = PFD_DOUBLEBUFFER | PFD_SUPPORT_OPENGL | PFD_DRAW_TO_WINDOW;
     pixel_format_des.iPixelType = PFD_TYPE_RGBA;
     pixel_format_des.cColorBits = 32;
@@ -241,7 +243,6 @@ bool init_openGL(platform_context *plat_state)
     if (format == 0 || SetPixelFormat(state->hdc, format, &pixel_format_des) == FALSE)
     {
         MessageBox(NULL, ("Failed to set a compatible format"), "DERROR", MB_ICONERROR);
-        DFATAL("Failed to set a compatible format");
         return false;
     }
 
@@ -250,127 +251,74 @@ bool init_openGL(platform_context *plat_state)
     if (temp_context == NULL)
     {
         MessageBox(NULL, ("Failed to create the initial rendereing context"), "DERROR", MB_ICONERROR);
-        DFATAL("Failed to create the initial rendereing context");
         return false;
     }
 
-    wglMakeCurrent(state->hdc, temp_context);
+    if (!wglMakeCurrent(state->hdc, temp_context))
+    {
+        wglDeleteContext(temp_context);
+        return false;
+    }
 
-    gladLoaderLoadWGL(state->hdc);
-
-    state->opengl_context = wglCreateContext(state->hdc);
+    typedef HGLRC (WINAPI *create_context_proc)(HDC, HGLRC, const int *);
+    create_context_proc create_context = (create_context_proc)wglGetProcAddress("wglCreateContextAttribsARB");
+    // WGL major version, minor version, profile mask, core profile bit.
+    const int attributes[] = {0x2091, 3, 0x2092, 3, 0x9126, 1, 0};
+    if (create_context)
+        state->opengl_context = create_context(state->hdc, NULL, attributes);
 
     if (state->opengl_context == NULL)
     {
-        MessageBox(NULL, ("Failed to create the final rendering context!"), "DERROR", MB_ICONERROR);
-        DFATAL("Failed to create the final rendereing context");
+        wglMakeCurrent(NULL, NULL);
+        wglDeleteContext(temp_context);
+        MessageBox(NULL, ("OpenGL 3.3 core context unavailable"), "DERROR", MB_ICONERROR);
         return false;
     }
 
     wglMakeCurrent(NULL, NULL);                        // Remove the temporary context from being active
     wglDeleteContext(temp_context);                    // Delete the temporary OpenGL context
-    wglMakeCurrent(state->hdc, state->opengl_context); // Make our OpenGL 3.2 context current
+    if (!wglMakeCurrent(state->hdc, state->opengl_context))
+        return false;
 
     // Glad Loader!
-    if (!gladLoaderLoadGL())
+    if (!gladLoadGL() || !GLAD_GL_VERSION_3_3)
     {
         MessageBox(NULL, ("Glad Loader failed!"), "DERROR", MB_ICONERROR);
-        DFATAL("Glad Loader failed!");
         return false;
     }
 
-    bool should_activate = 1; // TODO: if the window should not accept input, this should be false.
+    b8 should_activate = 1; // TODO: if the window should not accept input, this should be false.
     s32 show_window_command_flags = should_activate ? SW_SHOW : SW_SHOWNOACTIVATE;
     // If initially minimized, use SW_MINIMIZE : SW_SHOWMINNOACTIVE;
     // If initially maximized, use SW_SHOWMAXIMIZED : SW_MAXIMIZE
     ShowWindow(state->hwnd, show_window_command_flags);
 
     opengl_initialized = true;
+    glViewport(0, 0, state->width, state->height);
 
     return true;
 }
-void platform_swap_buffers(platform_context *plat_state)
+void platform_swap_buffers(void)
 {
-    internal_state *state = (internal_state *)plat_state->internal_state;
+
     SwapBuffers(state->hdc);
 }
 void platform_set_viewport(void *data, u16 width, u16 height)
 {
     if (opengl_initialized)
     {
-        platform_context *plat_context = (platform_context *)data;
-        internal_state *state = (internal_state *)plat_context->internal_state;
 
         state->width = width;
         state->height = height;
         glViewport(0, 0, width, height);
-        glViewport(0, 0, width, height);
     }
 }
 
-void platform_get_window_dimensions(platform_context *plat_state, s32 *width, s32 *height)
+void platform_get_window_dimensions(u32 *width, u32 *height)
 {
-    internal_state *state = (internal_state *)plat_state->internal_state;
+
     *width = state->width;
     *height = state->height;
-}
-// memory
-void *platform_allocate(u64 size, bool aligned)
-{
-    return malloc(size);
-}
-void platform_free(void *block, bool aligned)
-{
-    free(block);
-}
-void *platform_zero_memory(void *block, u64 size)
-{
-    return memset(block, 0, size);
-}
-void *platform_copy_memory(void *dest, const void *source, u64 size)
-{
-    return memcpy(dest, source, size);
-}
-void *platform_set_memory(void *dest, s32 value, u64 size)
-{
-    return memset(dest, value, size);
-}
-
-void platform_load_file(const char *filepath, std::string *str)
-{
-    std::ifstream file(filepath);
-
-    if (!file.is_open())
-    {
-        DFATAL("Failed to open file.");
-    }
-
-    std::ostringstream file_stream;
-    file_stream << file.rdbuf();
-    *str = file_stream.str();
-    file.close();
-}
-
-void platform_get_shaders(std::string *vertex_shader_source, std::string *fragment_shader_source)
-{
-    char vertex_path[] = "../assets/shaders/vert.glsl";
-    char frag_path[] = "../assets/shaders/frag.glsl";
-
-    platform_load_file(vertex_path, vertex_shader_source);
-    platform_load_file(frag_path, fragment_shader_source);
-}
-
-void platform_log_message(const char *buffer, log_levels level, u32 max_chars)
-{
-
-    HANDLE console_handle = GetStdHandle(STD_OUTPUT_HANDLE);
-    // DFATAL,DERROR,WARN,DINFO,DEBUG,TRACE
-    static u8 levels[6] = {64, 4, 6, 2, 1, 8};
-    SetConsoleTextAttribute(console_handle, levels[level]);
-
-    u64 length = strlen(buffer);
-    LPDWORD number_written = 0;
-    WriteConsoleA(GetStdHandle(STD_OUTPUT_HANDLE), buffer, (DWORD)length, number_written, 0);
 }
 f64 platform_get_absolute_time(void)
 {
