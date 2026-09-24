@@ -1097,7 +1097,7 @@ b8 platform_pump_messages()
     return result == -1 ? false : true;
 }
 
-void platform_system_shutdown()
+void platform_shutdown()
 {
     printf("%s\n", "Shutting down linux-wayland platform...");
     xdg_toplevel_destroy(platform_state_ptr->xdg_toplevel);

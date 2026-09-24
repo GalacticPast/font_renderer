@@ -1,15 +1,12 @@
 #version 330 core
-layout (location = 0) in vec3 a_pos;
-layout (location = 1) in vec3 a_color;
-
-
-out vec3 color;
-
-uniform mat4 projection;
-uniform mat4 view;
+layout (location = 0) in vec2 a_pos;
 
 void main()
 {
-    gl_Position = projection * view * vec4(a_pos, 1.0);
-    color = a_color;
+    vec2 scaled_pos = a_pos * 0.001;
+    
+    scaled_pos.x -= 0.5; 
+    scaled_pos.y -= 0.5;
+
+    gl_Position = vec4(scaled_pos, 0.0, 1.0);
 }

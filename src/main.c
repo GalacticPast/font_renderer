@@ -9,6 +9,11 @@
 #include "input.h"
 #include "platform/platform.h"
 
+#define ONE_TWENTIETH 0.05f
+
+#define WINDOW_WIDTH 600
+#define WINDOW_HEIGHT 400
+
 typedef struct camera
 {
     db_vector3 position;
@@ -22,13 +27,14 @@ typedef struct camera
     f32 fov;
 } camera;
 
-db_array_decl(contours, db_vector2);
+db_array_decl(vector2, db_vector2);
 db_array_decl(s32, s32);
+db_array_decl(f32, f32);
 
 typedef struct
 {
-    db_array_s32      contours_start_indicies;
-    db_array_contours contours;
+    db_array_s32     contours_start_indicies;
+    db_array_vector2 contours;
 } glyph_data;
 
 void       camera_set_matrix(camera *camera, shader *shader, f32 near_plane, f32 far_plane);
@@ -40,7 +46,7 @@ static inline db_matrix4 mat4_look_at(db_vector3 position, db_vector3 target, db
 
 b8 opengl_startup(db_arena *main_arena)
 {
-    b8 success = platform_startup(main_arena, "slug", 0, 0, 600, 400);
+    b8 success = platform_startup(main_arena, "slug", 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
     if (!success)
         return false;
     input_initialize(main_arena);
@@ -66,6 +72,32 @@ GLuint indices[] =
 	3, 0, 4
 };
 // clang-format on
+
+void gl_load_debug_glyph_outline(glyph_data *b, db_array_f32 *lines)
+{
+    // these are in em units
+    s32 size              = b->contours.length;
+    s32 first_outline_end = b->contours_start_indicies.data[1];
+
+    for (s32 i = 1; i < first_outline_end; i++)
+    {
+        db_vector2 *p1 = &b->contours.data[i - 1];
+        db_vector2 *p2 = &b->contours.data[i];
+        // append the start
+        db_array_f32_append(lines, p1->x);
+        db_array_f32_append(lines, p1->y);
+
+        db_vector2 temp = {};
+        for (s32 j = 1; j < 20; j++)
+        {
+            temp = db_vector2_lerp(*p1, *p2, j * ONE_TWENTIETH);
+            db_array_f32_append(lines, temp.x);
+            db_array_f32_append(lines, temp.y);
+        }
+    }
+    db_array_f32_append(lines, b->contours.data[0].x);
+    db_array_f32_append(lines, b->contours.data[0].y);
+}
 
 int main()
 {
@@ -95,19 +127,30 @@ int main()
     VBO vbo;
     EBO ebo;
 
-    vao_create(&vao);
-    vao_bind(&vao);
+    // vao_create(&vao);
+    // vao_bind(&vao);
+    //
+    // vbo_create(&vbo, vertices, sizeof(vertices));
+    // ebo_create(&ebo, indices, sizeof(indices));
+    //
+    // vao_link_vbo_attribs(&vao, &vbo, 0, 3, GL_FLOAT, 8 * sizeof(f32), (void *)0);
+    // vao_link_vbo_attribs(&vao, &vbo, 1, 3, GL_FLOAT, 8 * sizeof(f32), (void *)(3 * sizeof(f32)));
+    // vao_link_vbo_attribs(&vao, &vbo, 2, 2, GL_FLOAT, 8 * sizeof(f32), (void *)(6 * sizeof(f32)));
+    //
+    // vao_unbind();
 
-    vbo_create(&vbo, vertices, sizeof(vertices));
-    ebo_create(&ebo, indices, sizeof(indices));
+    db_array_f32 b_vertices = db_array_f32_init(&main_arena);
 
-    vao_link_vbo_attribs(&vao, &vbo, 0, 3, GL_FLOAT, 8 * sizeof(f32), (void *)0);
-    vao_link_vbo_attribs(&vao, &vbo, 1, 3, GL_FLOAT, 8 * sizeof(f32), (void *)(3 * sizeof(f32)));
-    vao_link_vbo_attribs(&vao, &vbo, 2, 2, GL_FLOAT, 8 * sizeof(f32), (void *)(6 * sizeof(f32)));
+    glyph_data b = load_font(&main_arena);
+    gl_load_debug_glyph_outline(&b, &b_vertices);
 
-    vao_unbind();
+    VAO b_vao;
+    VBO b_vbo;
 
-    load_font(&main_arena);
+    vao_create(&b_vao);
+    vao_bind(&b_vao);
+    vbo_create(&b_vbo, b_vertices.data, b_vertices.length * sizeof(f32));
+    vao_link_vbo_attribs(&b_vao, &b_vbo, 0, 2, GL_FLOAT, 2 * sizeof(f32), (void *)0);
 
     while (true)
     {
@@ -115,17 +158,17 @@ int main()
             break;
         update(&main_arena);
 
-        glClearColor(0.5f, 0.5f, 0.0f, 1.0f);
+        glClearColor(0.1f, 0.0f, 0.0f, 1.0f);
 
         glClear(GL_COLOR_BUFFER_BIT);
 
         shader_use(&shader);
 
-        camera_set_matrix(&camera, &shader, 0.1f, 100.0f);
+        // camera_set_matrix(&camera, &shader, 0.1f, 100.0f);
 
-        vao_bind(&vao);
+        vao_bind(&b_vao);
 
-        glDrawElements(GL_TRIANGLES, sizeof(indices) / sizeof(int), GL_UNSIGNED_INT, 0);
+        glDrawArrays(GL_LINE_STRIP, 0, b_vertices.length / 2);
 
         platform_swap_buffers();
     }
@@ -216,7 +259,7 @@ glyph_data load_font(db_arena *arena)
 
     glyph_data g_data = {0};
 
-    g_data.contours                = db_array_contours_init(arena);
+    g_data.contours                = db_array_vector2_init(arena);
     g_data.contours_start_indicies = db_array_s32_init(arena);
 
     db_vector2 curr_point = db_vector2_zero();
@@ -232,7 +275,7 @@ glyph_data load_font(db_arena *arena)
         switch (vertices[i].type)
         {
             case STBTT_vmove: {
-                db_array_s32_append(&g_data.contours_start_indicies, db_array_contours_length(&g_data.contours));
+                db_array_s32_append(&g_data.contours_start_indicies, db_array_vector2_length(&g_data.contours));
                 curr_point.x = vertices[i].x;
                 curr_point.y = vertices[i].y;
             }
@@ -240,18 +283,18 @@ glyph_data load_font(db_arena *arena)
             case STBTT_vline: {
                 db_vector2 p2  = db_vector2_make(vertices[i].x, vertices[i].y);
                 db_vector2 mid = db_vector2_make((p2.x + curr_point.x) * 0.5f, (p2.y + curr_point.y) * 0.5f);
-                db_array_contours_append(&g_data.contours, curr_point);
-                db_array_contours_append(&g_data.contours, mid);
-                db_array_contours_append(&g_data.contours, p2);
+                db_array_vector2_append(&g_data.contours, curr_point);
+                db_array_vector2_append(&g_data.contours, mid);
+                db_array_vector2_append(&g_data.contours, p2);
                 curr_point = p2;
             }
             break;
             case STBTT_vcurve: {
                 db_vector2 p2        = db_vector2_make(vertices[i].x, vertices[i].y);
                 db_vector2 control_p = db_vector2_make(vertices[i].cx, vertices[i].cy);
-                db_array_contours_append(&g_data.contours, curr_point);
-                db_array_contours_append(&g_data.contours, control_p);
-                db_array_contours_append(&g_data.contours, p2);
+                db_array_vector2_append(&g_data.contours, curr_point);
+                db_array_vector2_append(&g_data.contours, control_p);
+                db_array_vector2_append(&g_data.contours, p2);
                 curr_point = p2;
             }
             break;
