@@ -73,6 +73,13 @@ GLuint indices[] =
 };
 // clang-format on
 
+f32 inline bezier_solver(db_vector2*p0, db_vector2* p1, db_vector2* p3, f32 t)
+{
+    //(1-t)²P0 + 2(1-t)t·P1 + t²P2
+    f32 a  = (1.0 - t)*(1.0 - t);
+    db_vector2 f_term =  db_vector2_muiltiply(p0, a);
+}
+
 void gl_load_debug_glyph_outline(glyph_data *b, db_array_f32 *lines)
 {
     // these are in em units
@@ -81,16 +88,15 @@ void gl_load_debug_glyph_outline(glyph_data *b, db_array_f32 *lines)
     s32 size              = b->contours.length;
     s32 first_outline_end = b->contours_start_indicies.data[1];
 
-    for (s32 i = 1; i < first_outline_end; i++)
+    for (s32 i = 0; i < first_outline_end; i+=3)
     {
-        db_vector2 *p1 = &b->contours.data[i - 1];
-        db_vector2 *p2 = &b->contours.data[i];
-        // append the start
-        db_array_f32_append(lines, p1->x);
-        db_array_f32_append(lines, p1->y);
+        db_vector2 *p0 = &b->contours.data[i];
+        db_vector2 *p1 = &b->contours.data[i + 1]; // control point
+        db_vector2 *p2 = &b->contours.data[i + 2];
+
 
         db_vector2 temp = {};
-        for (s32 j = 1; j < 20; j++)
+        for (s32 j = 0; j < 20; j++) 
         {
             temp = db_vector2_lerp(*p1, *p2, j * ONE_TWENTIETH);
             db_array_f32_append(lines, temp.x);
