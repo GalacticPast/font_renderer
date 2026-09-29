@@ -76,6 +76,8 @@ GLuint indices[] =
 void gl_load_debug_glyph_outline(glyph_data *b, db_array_f32 *lines)
 {
     // these are in em units
+    s32 font_size = 12;
+
     s32 size              = b->contours.length;
     s32 first_outline_end = b->contours_start_indicies.data[1];
 
