@@ -14,6 +14,8 @@
 #define WINDOW_WIDTH 600
 #define WINDOW_HEIGHT 400
 
+#define FONT_SIZE 20
+
 typedef struct camera
 {
     db_vector3 position;
@@ -33,6 +35,7 @@ db_array_decl(f32, f32);
 
 typedef struct
 {
+    f32              em_to_px_scale;
     db_array_s32     contours_start_indicies;
     db_array_vector2 contours;
 } glyph_data;
@@ -73,38 +76,48 @@ GLuint indices[] =
 };
 // clang-format on
 
-f32 inline bezier_solver(db_vector2*p0, db_vector2* p1, db_vector2* p3, f32 t)
+db_vector2 bezier_solver(db_vector2 *p0, db_vector2 *p1, db_vector2 *p3, f32 t)
 {
     //(1-t)²P0 + 2(1-t)t·P1 + t²P2
-    f32 a  = (1.0 - t)*(1.0 - t);
-    db_vector2 f_term =  db_vector2_muiltiply(p0, a);
+    f32        a      = (1.0 - t) * (1.0 - t);
+    db_vector2 f_term = db_vector2_multiply(*p0, a);
+    f32        b      = 2.0 * (1 - t) * t;
+    db_vector2 s_term = db_vector2_multiply(*p1, b);
+    f32        c      = t * t;
+    db_vector2 t_term = db_vector2_multiply(*p3, c);
+
+    db_vector2 ans = db_vector2_add(f_term, s_term);
+    ans            = db_vector2_add(ans, t_term);
+    return ans;
 }
 
 void gl_load_debug_glyph_outline(glyph_data *b, db_array_f32 *lines)
 {
-    // these are in em units
-    s32 font_size = 12;
-
     s32 size              = b->contours.length;
     s32 first_outline_end = b->contours_start_indicies.data[1];
-
-    for (s32 i = 0; i < first_outline_end; i+=3)
+    // just show the first contour
+    for (s32 i = 0; i < first_outline_end; i += 3)
     {
         db_vector2 *p0 = &b->contours.data[i];
         db_vector2 *p1 = &b->contours.data[i + 1]; // control point
         db_vector2 *p2 = &b->contours.data[i + 2];
 
+        db_vector2 p0_px = db_vector2_multiply(*p0, b->em_to_px_scale);
+        db_vector2 p1_px = db_vector2_multiply(*p1, b->em_to_px_scale);
+        db_vector2 p2_px = db_vector2_multiply(*p2, b->em_to_px_scale);
+
+        p0_px = db_vector2_multiply(p0_px, FONT_SIZE);
+        p1_px = db_vector2_multiply(p1_px, FONT_SIZE);
+        p2_px = db_vector2_multiply(p2_px, FONT_SIZE);
 
         db_vector2 temp = {};
-        for (s32 j = 0; j < 20; j++) 
+        for (s32 j = 0; j <= 20; j++)
         {
-            temp = db_vector2_lerp(*p1, *p2, j * ONE_TWENTIETH);
+            temp = bezier_solver(&p0_px, &p1_px, &p2_px, ONE_TWENTIETH * j);
             db_array_f32_append(lines, temp.x);
             db_array_f32_append(lines, temp.y);
         }
     }
-    db_array_f32_append(lines, b->contours.data[0].x);
-    db_array_f32_append(lines, b->contours.data[0].y);
 }
 
 int main()
@@ -172,7 +185,7 @@ int main()
 
         shader_use(&shader);
 
-        // camera_set_matrix(&camera, &shader, 0.1f, 100.0f);
+        camera_set_matrix(&camera, &shader, 0.1f, 100.0f);
 
         vao_bind(&b_vao);
 
@@ -255,6 +268,7 @@ glyph_data load_font(db_arena *arena)
     db_file_contents font_content =
         db_file_read_contents(arena, db_file_mode_rb, 0, "../assets/font/Archivo-Regular.ttf");
     ASSERT_WITH_MSG(font_content.size, "couldnt read the font.");
+
     stbtt_fontinfo font_info = {};
     b8             res       = stbtt_InitFont(&font_info, font_content.data, 0);
     ASSERT_WITH_MSG(res, "font loeading failed");
@@ -269,6 +283,7 @@ glyph_data load_font(db_arena *arena)
 
     g_data.contours                = db_array_vector2_init(arena);
     g_data.contours_start_indicies = db_array_s32_init(arena);
+    g_data.em_to_px_scale          = stbtt_ScaleForMappingEmToPixels(&font_info, FONT_SIZE);
 
     db_vector2 curr_point = db_vector2_zero();
 
