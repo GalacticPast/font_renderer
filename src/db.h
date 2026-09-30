@@ -100,9 +100,8 @@ typedef size_t s_size;
 #define s32_min -2147483648
 #define s32_max 2147483647
 
-// hmmmm we need a floating point max too ?
-#define db_max(n, m) (s64) n >= (s64)m ? (s64)n : (s64)m
-#define db_min(n, m) (s64) n <= (s64)m ? (s64)n : (s64)m
+#define db_min(a, b) ((a) < (b) ? (a) : (b))
+#define db_max(a, b) ((a) > (b) ? (a) : (b))
 
 #define KB(n) ((s32)n * 1024)
 #define MB(n) ((s32)n * 1024 * 1024)

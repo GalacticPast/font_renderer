@@ -161,6 +161,9 @@ typedef short db_half;
 
 #define DB_MATH_LOG_TWO 0.693147180559945309417232121458176568f
 #define DB_MATH_LOG_TEN 2.30258509299404568401799145468436421f
+
+#define DB_MATH_F32_MAX 3.4028235e38f
+#define DB_MATH_F32_MIN (-3.4028235e38f)
 #endif
 
 #if defined(__cplusplus)
@@ -209,6 +212,7 @@ extern "C"
 
 #ifndef db_max3
 #define db_max3(a, b, c) db_max(db_max(a, b), c)
+
 #endif
 
     static inline f32 db_copy_sign(f32 x, f32 y);

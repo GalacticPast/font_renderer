@@ -69,19 +69,17 @@ void ebo_delete(EBO *ebo_object)
     glDeleteBuffers(1, &ebo_object->id);
 }
 
-b8 shader_create(db_arena *arena, shader *shader)
+b8 shader_create(db_arena *arena, shader *shader, const char *vertex_path, const char *fragment_path)
 {
     printf("Creating vertex and fragment shaders\n");
 
-    db_file_contents vertex_shader_source =
-        db_file_read_contents(arena, db_file_mode_read, 1, "../assets/shaders/vertex.glsl");
+    db_file_contents vertex_shader_source = db_file_read_contents(arena, db_file_mode_read, 1, vertex_path);
     if (vertex_shader_source.size == 0)
     {
         printf("shader copying error\n");
         return false;
     }
-    db_file_contents fragment_shader_source =
-        db_file_read_contents(arena, db_file_mode_read, 1, "../assets/shaders/fragment.glsl");
+    db_file_contents fragment_shader_source = db_file_read_contents(arena, db_file_mode_read, 1, fragment_path);
     if (fragment_shader_source.size == 0)
     {
         printf("shader copying error\n");
@@ -132,7 +130,7 @@ b8 shader_create(db_arena *arena, shader *shader)
     glAttachShader(shader->program, fragment_shader);
     glLinkProgram(shader->program);
 
-    glGetShaderiv(shader->program, GL_LINK_STATUS, &success);
+    glGetProgramiv(shader->program, GL_LINK_STATUS, &success);
 
     if (!success)
     {

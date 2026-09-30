@@ -38,7 +38,7 @@ void ebo_bind(EBO *ebo_object);
 void ebo_unbind();
 void ebo_delete(EBO *ebo_object);
 
-b8 shader_create(db_arena *arena, shader *shader);
+b8 shader_create(db_arena *arena, shader *shader, const char *vertex_path, const char *fragment_path);
 
 void shader_use(shader *shader);
 void shader_destroy(shader *shader);
