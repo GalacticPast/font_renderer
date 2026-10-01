@@ -1,5 +1,5 @@
 #include "gl.h"
-
+// vertex array object -> save state
 void vao_create(VAO *vao_object)
 {
     glGenVertexArrays(1, &vao_object->id);
@@ -67,6 +67,24 @@ void ebo_unbind()
 void ebo_delete(EBO *ebo_object)
 {
     glDeleteBuffers(1, &ebo_object->id);
+}
+
+void ssbo_create(SSBO *ssbo_object, s32 layout, void *data, s_size type_size, s_size arr_size)
+{
+    glGenBuffers(1, &ssbo_object->id);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo_object->id);
+    glBufferData(GL_SHADER_STORAGE_BUFFER, type_size * arr_size, data, GL_DYNAMIC_DRAW);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, layout, ssbo_object->id);
+}
+void ssbo_bind(SSBO *ssbo_object)
+{
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+}
+void ssbo_unbind()
+{
+}
+void ssbo_delete(SSBO *ssbo_object)
+{
 }
 
 b8 shader_create(db_arena *arena, shader *shader, const char *vertex_path, const char *fragment_path)

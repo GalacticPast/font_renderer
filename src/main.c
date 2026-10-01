@@ -35,9 +35,19 @@ db_array_decl(f32, f32);
 
 typedef struct
 {
-    f32              em_to_px_scale;
-    db_array_s32     contours_start_indicies;
-    db_array_vector2 contours;
+    db_vector4 p0;
+    db_vector4 p1; // control
+    db_vector4 p2;
+} curve;
+
+db_array_decl(curves, curve);
+
+typedef struct
+{
+    f32             em_to_px_scale;
+    db_vector4      half_extent;
+    db_array_s32    curves_start_index;
+    db_array_curves curves;
 } glyph_data;
 
 typedef struct
@@ -45,7 +55,7 @@ typedef struct
     glyph_data data[26];
 } glyphs;
 
-void   camera_set_matrix(camera *camera, shader *shader, f32 near_plane, f32 far_plane);
+void   camera_set_matrix(camera *camera, shader *shader, db_vector3 glyph_scale, f32 near_plane, f32 far_plane);
 b8     update(db_arena *main_arena);
 glyphs load_font(db_arena *arena);
 
@@ -62,136 +72,63 @@ b8 opengl_startup(db_arena *main_arena)
 }
 
 // clang-format off
-GLfloat vertices[] =
-{ //     COORDINATES     /        COLORS      /   TexCoord  //
-	-0.5f, 0.0f,  0.5f,     0.83f, 0.70f, 0.44f,	0.0f, 0.0f,
-	-0.5f, 0.0f, -0.5f,     0.83f, 0.70f, 0.44f,	5.0f, 0.0f,
-	 0.5f, 0.0f, -0.5f,     0.83f, 0.70f, 0.44f,	0.0f, 0.0f,
-	 0.5f, 0.0f,  0.5f,     0.83f, 0.70f, 0.44f,	5.0f, 0.0f,
-	 0.0f, 0.8f,  0.0f,     0.92f, 0.86f, 0.76f,	2.5f, 5.0f
+f32 vertices[] =
+{ //     COORDINATES
+	-0.5f, -0.5f, 0.0f,
+	 0.5f, -0.5f, 0.0f,
+	 0.5f,  0.5f, 0.0f,
+	-0.5f,  0.5f, 0.0f,
 };
-GLuint indices[] =
+u32 indices[] =
 {
 	0, 1, 2,
 	0, 2, 3,
-	0, 1, 4,
-	1, 2, 4,
-	2, 3, 4,
-	3, 0, 4
 };
 // clang-format on
 
-db_vector2 bezier_solver(db_vector2 *p0, db_vector2 *p1, db_vector2 *p3, f32 t)
+void center_glyphs(glyphs *g)
 {
-    f32        a      = (1.0 - t) * (1.0 - t);
-    db_vector2 f_term = db_vector2_multiply(*p0, a);
-    f32        b      = 2.0 * (1 - t) * t;
-    db_vector2 s_term = db_vector2_multiply(*p1, b);
-    f32        c      = t * t;
-    db_vector2 t_term = db_vector2_multiply(*p3, c);
-
-    db_vector2 ans = db_vector2_add(f_term, s_term);
-    ans            = db_vector2_add(ans, t_term);
-    return ans;
-}
-
-void gl_load_debug_glyph_outline(glyph_data *b, db_array_f32 *lines, db_array_s32 *contour_vertex_counts)
-{
-    printf("contours %ld\n", b->contours_start_indicies.length);
-    db_vector2 min = db_vector2_make(DB_MATH_F32_MAX, DB_MATH_F32_MAX);
-    db_vector2 max = db_vector2_make(DB_MATH_F32_MIN, DB_MATH_F32_MIN);
-
-    s32 contour_count = b->contours_start_indicies.length;
-
-    // Pass 1: bounding box across every contour, so every contour is centered
-    // against the same glyph-wide origin instead of a running/partial one.
-    for (s32 i = 0; i < b->contours.length; i += 3)
+    for (s32 j = 0; j < 26; j++)
     {
-        db_vector2 *p0 = &b->contours.data[i];
-        db_vector2 *p1 = &b->contours.data[i + 1]; // control point
-        db_vector2 *p2 = &b->contours.data[i + 2];
+        glyph_data *b           = &g->data[j];
+        db_vector4  min         = db_vector4_make(DB_MATH_F32_MAX, DB_MATH_F32_MAX, 0.0, 0.0);
+        db_vector4  max         = db_vector4_make(DB_MATH_F32_MIN, DB_MATH_F32_MIN, 0.0, 0.0);
+        s32         curves_size = b->curves.length;
 
-        db_vector2 p0_px = db_vector2_multiply(*p0, b->em_to_px_scale);
-        db_vector2 p1_px = db_vector2_multiply(*p1, b->em_to_px_scale);
-        db_vector2 p2_px = db_vector2_multiply(*p2, b->em_to_px_scale);
-
-        min.x = db_min(db_min3(p0_px.x, p1_px.x, p2_px.x), min.x);
-        min.y = db_min(db_min3(p0_px.y, p1_px.y, p2_px.y), min.y);
-
-        max.x = db_max(db_max3(p0_px.x, p1_px.x, p2_px.x), max.x);
-        max.y = db_max(db_max3(p0_px.y, p1_px.y, p2_px.y), max.y);
-    }
-
-    db_vector2 center = db_vector2_multiply(db_vector2_add(min, max), 0.5f);
-
-    // Pass 2: tessellate each contour separately and record how many vertices
-    // it produced, so each contour can be drawn as its own line strip instead
-    // of one strip that stitches every contour together with stray edges.
-    // for (s32 c = 0; c < contour_count; c++)
-    // {
-    //     s32 outline_start = b->contours_start_indicies.data[c];
-    //     s32 outline_end   = (c + 1 < contour_count) ? b->contours_start_indicies.data[c + 1] : b->contours.length;
-    //
-    //     s32 contour_vertex_count = 0;
-    //     for (s32 i = outline_start; i < outline_end; i += 3)
-    //     {
-    //         db_vector2 *p0 = &b->contours.data[i];
-    //         db_vector2 *p1 = &b->contours.data[i + 1]; // control point
-    //         db_vector2 *p2 = &b->contours.data[i + 2];
-    //
-    //         db_vector2 p0_px = db_vector2_multiply(*p0, b->em_to_px_scale);
-    //         db_vector2 p1_px = db_vector2_multiply(*p1, b->em_to_px_scale);
-    //         db_vector2 p2_px = db_vector2_multiply(*p2, b->em_to_px_scale);
-    //
-    //         p0_px = db_vector2_subtract(p0_px, center);
-    //         p1_px = db_vector2_subtract(p1_px, center);
-    //         p2_px = db_vector2_subtract(p2_px, center);
-    //
-    //         db_vector2 temp = {};
-    //         for (s32 t = 0; t <= 20; t++)
-    //         {
-    //             temp = bezier_solver(&p0_px, &p1_px, &p2_px, ONE_TWENTIETH * t);
-    //             db_array_f32_append(lines, temp.x);
-    //             db_array_f32_append(lines, temp.y);
-    //             contour_vertex_count++;
-    //         }
-    //     }
-    //     db_array_s32_append(contour_vertex_counts, contour_vertex_count);
-    // }
-    //
-    for (s32 c = 0; c < contour_count; c++)
-    {
-        s32 outline_start = b->contours_start_indicies.data[c];
-        s32 outline_end   = (c + 1 < contour_count) ? b->contours_start_indicies.data[c + 1] : b->contours.length;
-
-        s32 contour_edge = 0;
-        for (s32 i = outline_start; i < outline_end; i += 3)
+        for (s32 i = 0; i < curves_size; i++)
         {
-            db_vector2 *p0 = &b->contours.data[i];
-            db_vector2 *p1 = &b->contours.data[i + 1]; // control point
-            db_vector2 *p2 = &b->contours.data[i + 2];
+            db_vector4 *p0 = &b->curves.data[i].p0;
+            db_vector4 *p1 = &b->curves.data[i].p1;
+            db_vector4 *p2 = &b->curves.data[i].p2;
 
-            db_vector2 p0_px = db_vector2_multiply(*p0, b->em_to_px_scale);
-            db_vector2 p1_px = db_vector2_multiply(*p1, b->em_to_px_scale);
-            db_vector2 p2_px = db_vector2_multiply(*p2, b->em_to_px_scale);
+            db_vector4 p0_px = db_vector4_multiply(*p0, b->em_to_px_scale);
+            db_vector4 p1_px = db_vector4_multiply(*p1, b->em_to_px_scale);
+            db_vector4 p2_px = db_vector4_multiply(*p2, b->em_to_px_scale);
 
-            p0_px = db_vector2_subtract(p0_px, center);
-            p1_px = db_vector2_subtract(p1_px, center);
-            p2_px = db_vector2_subtract(p2_px, center);
+            min.x = db_min(db_min3(p0_px.x, p1_px.x, p2_px.x), min.x);
+            min.y = db_min(db_min3(p0_px.y, p1_px.y, p2_px.y), min.y);
 
-            for (s32 j = 0; j <= 20; j++)
-            {
-                db_array_f32_append(lines, p0_px.x);
-                db_array_f32_append(lines, p0_px.y);
-                db_array_f32_append(lines, p1_px.x);
-                db_array_f32_append(lines, p1_px.y);
-                db_array_f32_append(lines, p2_px.x);
-                db_array_f32_append(lines, p2_px.y);
-                db_array_f32_append(lines, ONE_TWENTIETH * j);
-                contour_edge++;
-            }
+            max.x = db_max(db_max3(p0_px.x, p1_px.x, p2_px.x), max.x);
+            max.y = db_max(db_max3(p0_px.y, p1_px.y, p2_px.y), max.y);
         }
-        db_array_s32_append(contour_vertex_counts, contour_edge);
+        db_vector4 center = db_vector4_multiply(db_vector4_add(min, max), 0.5f);
+        b->half_extent    = db_vector4_multiply(db_vector4_subtract(max, min), 0.5f);
+
+        // center it
+        for (s32 i = 0; i < curves_size; i++)
+        {
+            db_vector4 *p0 = &b->curves.data[i].p0;
+            db_vector4 *p1 = &b->curves.data[i].p1;
+            db_vector4 *p2 = &b->curves.data[i].p2;
+
+            db_vector4 p0_px = db_vector4_multiply(*p0, b->em_to_px_scale);
+            db_vector4 p1_px = db_vector4_multiply(*p1, b->em_to_px_scale);
+            db_vector4 p2_px = db_vector4_multiply(*p2, b->em_to_px_scale);
+
+            *p0 = db_vector4_subtract(p0_px, center);
+            *p1 = db_vector4_subtract(p1_px, center);
+            *p2 = db_vector4_subtract(p2_px, center);
+        }
     }
 }
 
@@ -219,72 +156,28 @@ int main()
     if (!a)
         return false;
 
-    // Isolated Loop-Blinn curve-fill test: one quadratic Bezier triangle,
-    // rendered separately from the debug line outline above.
-    struct shader curve_shader = {0};
-    b8            b            = shader_create(&main_arena, &curve_shader, "../assets/shaders/curve_vertex.glsl",
-                                               "../assets/shaders/curve_fragment.glsl");
-
-    if (!b)
-        return false;
-
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-    VAO vao;
-    VBO vbo;
-    EBO ebo;
-
-    // vao_create(&vao);
-    // vao_bind(&vao);
-    //
-    // vbo_create(&vbo, vertices, sizeof(vertices));
-    // ebo_create(&ebo, indices, sizeof(indices));
-    //
-    // vao_link_vbo_attribs(&vao, &vbo, 0, 3, GL_FLOAT, 8 * sizeof(f32), (void *)0);
-    // vao_link_vbo_attribs(&vao, &vbo, 1, 3, GL_FLOAT, 8 * sizeof(f32), (void *)(3 * sizeof(f32)));
-    // vao_link_vbo_attribs(&vao, &vbo, 2, 2, GL_FLOAT, 8 * sizeof(f32), (void *)(6 * sizeof(f32)));
-    //
-    // vao_unbind();
-
-    db_array_f32 b_vertices            = db_array_f32_init(&main_arena);
-    db_array_s32 contour_vertex_counts = db_array_s32_init(&main_arena);
-
     glyphs glyphs = load_font(&main_arena);
+    center_glyphs(&glyphs);
 
-    VAO b_vao;
-    VBO b_vbo;
+    VAO  b_vao;
+    VBO  b_vbo;
+    EBO  b_ebo;
+    SSBO b_ssbo;
 
     vao_create(&b_vao);
     vao_bind(&b_vao);
 
-    gl_load_debug_glyph_outline(&glyphs.data[0], &b_vertices, &contour_vertex_counts);
-    vbo_create(&b_vbo, b_vertices.data, b_vertices.length * sizeof(f32));
-    vao_link_vbo_attribs(&b_vao, &b_vbo, 0, 2, GL_FLOAT, 7 * sizeof(f32), (void *)0);
-    vao_link_vbo_attribs(&b_vao, &b_vbo, 1, 2, GL_FLOAT, 7 * sizeof(f32), (void *)(2 * sizeof(f32)));
-    vao_link_vbo_attribs(&b_vao, &b_vbo, 2, 2, GL_FLOAT, 7 * sizeof(f32), (void *)(4 * sizeof(f32)));
-    vao_link_vbo_attribs(&b_vao, &b_vbo, 3, 1, GL_FLOAT, 7 * sizeof(f32), (void *)(6 * sizeof(f32)));
+    vbo_create(&b_vbo, vertices, sizeof(vertices));
+    vao_link_vbo_attribs(&b_vao, &b_vbo, 0, 3, GL_FLOAT, 3 * sizeof(f32), (void *)0);
 
-    // clang-format off
-    // One hardcoded quadratic curve triangle: p0, control, p2, each with the
-    // Loop-Blinn uv (p0 -> (0,0), control -> (0.5,0), p2 -> (1,1)).
-    f32 curve_triangle[] =
-    {
-        // position         uv
-        -150.0f, -100.0f,   0.0f, 0.0f, // p0
-           0.0f,  100.0f,   0.5f, 0.0f, // control
-         150.0f, -100.0f,   1.0f, 1.0f, // p2
-    };
-    // clang-format on
+    ebo_create(&b_ebo, indices, sizeof(indices));
+    ebo_bind(&b_ebo);
+    // for now render A
 
-    VAO curve_vao;
-    VBO curve_vbo;
+    vao_unbind();
 
-    vao_create(&curve_vao);
-    vao_bind(&curve_vao);
-    vbo_create(&curve_vbo, curve_triangle, sizeof(curve_triangle));
-    vao_link_vbo_attribs(&curve_vao, &curve_vbo, 0, 2, GL_FLOAT, 4 * sizeof(f32), (void *)0);
-    vao_link_vbo_attribs(&curve_vao, &curve_vbo, 1, 2, GL_FLOAT, 4 * sizeof(f32), (void *)(2 * sizeof(f32)));
+    ssbo_create(&b_ssbo, 1, glyphs.data[0].curves.data, sizeof(curve), glyphs.data[0].curves.length);
+    ssbo_bind(&b_ssbo);
 
     b8  run = true;
     s32 i   = 0;
@@ -296,47 +189,30 @@ int main()
         run = update(&main_arena);
         if (input_is_key_down(KEY_D) && !input_was_key_down(KEY_D))
         {
-            vbo_delete(&b_vbo);
-            db_array_f32_clear(&b_vertices);
-            db_array_s32_clear(&contour_vertex_counts);
-
             i++;
             i %= 26;
-            gl_load_debug_glyph_outline(&glyphs.data[i], &b_vertices, &contour_vertex_counts);
-
-            vbo_create(&b_vbo, b_vertices.data, b_vertices.length * sizeof(f32));
-            vao_link_vbo_attribs(&b_vao, &b_vbo, 0, 2, GL_FLOAT, 7 * sizeof(f32), (void *)0);
-            vao_link_vbo_attribs(&b_vao, &b_vbo, 1, 2, GL_FLOAT, 7 * sizeof(f32), (void *)(2 * sizeof(f32)));
-            vao_link_vbo_attribs(&b_vao, &b_vbo, 2, 2, GL_FLOAT, 7 * sizeof(f32), (void *)(4 * sizeof(f32)));
-            vao_link_vbo_attribs(&b_vao, &b_vbo, 3, 1, GL_FLOAT, 7 * sizeof(f32), (void *)(6 * sizeof(f32)));
         }
 
-        glClearColor(0.1f, 0.0f, 0.0f, 1.0f);
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
         glClear(GL_COLOR_BUFFER_BIT);
 
         shader_use(&shader);
 
-        camera_set_matrix(&camera, &shader, 0.1f, 100.0f);
+        // quad vertices span [-0.5, 0.5], so scaling by 2x the half-extent
+        // makes the quad's world-space half-width/half-height match the glyph's.
+        db_vector4 half_extent = glyphs.data[i].half_extent;
+        db_vector3 glyph_scale = db_vector3_make(half_extent.x * 2.0f, half_extent.y * 2.0f, 1.0f);
+
+        camera_set_matrix(&camera, &shader, glyph_scale, 0.1f, 100.0f);
 
         vao_bind(&b_vao);
 
-        s32 offset = 0;
-        for (s32 i = 0; i < contour_vertex_counts.length; i++)
-        {
-            glDrawArrays(GL_LINE_STRIP, offset, contour_vertex_counts.data[i]);
-            offset += contour_vertex_counts.data[i];
-        }
-
-        shader_use(&curve_shader);
-        camera_set_matrix(&camera, &curve_shader, 0.1f, 100.0f);
-        vao_bind(&curve_vao);
-        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 
         platform_swap_buffers();
     }
     shader_destroy(&shader);
-    shader_destroy(&curve_shader);
     platform_shutdown();
 }
 
@@ -384,21 +260,26 @@ static inline db_matrix4 mat4_look_at(db_vector3 position, db_vector3 target, db
     return out_matrix;
 }
 
-void camera_set_matrix(camera *camera, shader *shader, f32 near_plane, f32 far_plane)
+void camera_set_matrix(camera *camera, shader *shader, db_vector3 glyph_scale, f32 near_plane, f32 far_plane)
 {
+    u32 projection_loc = glGetUniformLocation(shader->program, "projection");
+    u32 model_loc      = glGetUniformLocation(shader->program, "model");
+    u32 view_loc       = glGetUniformLocation(shader->program, "view");
 
     db_matrix4 ortho;
     db_matrix4_ortho2d(&ortho, -(f32)WINDOW_WIDTH / 2.0f, (f32)WINDOW_WIDTH / 2.0f, -(f32)WINDOW_HEIGHT / 2.0f,
                        (f32)WINDOW_HEIGHT / 2.0f);
 
-    u32 projection_loc = glGetUniformLocation(shader->program, "projection");
-
     db_matrix4 view;
     db_matrix4_identity(&view);
-    u32 view_loc = glGetUniformLocation(shader->program, "view");
+
+    db_matrix4 model;
+    db_matrix4_identity(&model);
+    db_matrix4_scale(&model, glyph_scale);
 
     glUniformMatrix4fv(view_loc, 1, GL_FALSE, view.data);
     glUniformMatrix4fv(projection_loc, 1, GL_FALSE, ortho.data);
+    glUniformMatrix4fv(model_loc, 1, GL_FALSE, model.data);
 }
 //@note:
 // this is temperory
@@ -434,38 +315,37 @@ glyphs load_font(db_arena *arena)
 
         glyph_data *g_data = &glyphs.data[i];
 
-        g_data->contours                = db_array_vector2_init(arena);
-        g_data->contours_start_indicies = db_array_s32_init(arena);
-        g_data->em_to_px_scale          = stbtt_ScaleForMappingEmToPixels(&font_info, FONT_SIZE);
+        g_data->curves             = db_array_curves_init(arena);
+        g_data->curves_start_index = db_array_s32_init(arena);
+        g_data->em_to_px_scale     = stbtt_ScaleForMappingEmToPixels(&font_info, FONT_SIZE);
 
-        db_vector2 curr_point = db_vector2_zero();
+        db_vector4 curr_point = db_vector4_zero();
 
         for (int i = 0; i < vertices_size; i++)
         {
             switch (vertices[i].type)
             {
                 case STBTT_vmove: {
-                    db_array_s32_append(&g_data->contours_start_indicies, db_array_vector2_length(&g_data->contours));
+                    db_array_s32_append(&g_data->curves_start_index, g_data->curves.length);
                     curr_point.x = vertices[i].x;
                     curr_point.y = vertices[i].y;
                 }
                 break;
                 case STBTT_vline: {
-                    db_vector2 p2  = db_vector2_make(vertices[i].x, vertices[i].y);
-                    db_vector2 mid = db_vector2_make((p2.x + curr_point.x) * 0.5f, (p2.y + curr_point.y) * 0.5f);
-                    db_array_vector2_append(&g_data->contours, curr_point);
-                    db_array_vector2_append(&g_data->contours, mid);
-                    db_array_vector2_append(&g_data->contours, p2);
-                    curr_point = p2;
+                    db_vector4 p_2 = db_vector4_make(vertices[i].x, vertices[i].y, 0.0, 0.0);
+                    db_vector4 control_p =
+                        db_vector4_make((p_2.x + curr_point.x) * 0.5f, (p_2.y + curr_point.y) * 0.5f, 0.0, 0.0);
+                    curve c = {.p0 = curr_point, .p1 = control_p, .p2 = p_2};
+                    db_array_curves_append(&g_data->curves, c);
+                    curr_point = p_2;
                 }
                 break;
                 case STBTT_vcurve: {
-                    db_vector2 p2        = db_vector2_make(vertices[i].x, vertices[i].y);
-                    db_vector2 control_p = db_vector2_make(vertices[i].cx, vertices[i].cy);
-                    db_array_vector2_append(&g_data->contours, curr_point);
-                    db_array_vector2_append(&g_data->contours, control_p);
-                    db_array_vector2_append(&g_data->contours, p2);
-                    curr_point = p2;
+                    db_vector4 p_2       = db_vector4_make(vertices[i].x, vertices[i].y, 0.0, 0.0);
+                    db_vector4 control_p = db_vector4_make(vertices[i].cx, vertices[i].cy, 0.0, 0.0);
+                    curve      c         = {.p0 = curr_point, .p1 = control_p, .p2 = p_2};
+                    db_array_curves_append(&g_data->curves, c);
+                    curr_point = p_2;
                 }
                 break;
                 case STBTT_vcubic: {

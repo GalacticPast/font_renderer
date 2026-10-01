@@ -1,21 +1,27 @@
-#version 330 core
-layout (location = 0) in vec2 p0;
-layout (location = 1) in vec2 p1;
-layout (location = 2) in vec2 p2;
-layout (location = 3) in float t;
+#version 430 core
+
+struct Curve
+{
+    vec4 p0;
+    vec4 p1; // control 
+    vec4 p2;
+};
+
+layout(std430, binding = 1) buffer curve_buffer{
+    Curve curves[];
+};
+
+layout (location = 0) in vec3 position;
 
 uniform mat4 projection;
 uniform mat4 view;
+uniform mat4 model;
 
-
-vec2 bezier_solver()
-{
-    vec2 ans = (1.0 - t) * (1.0 - t) * p0 + 2.0 * ( 1.0 - t) * t * p1 + t * t * p2;
-    return ans; 
-}
+out vec2 frag_pos;
 
 void main()
 {
-    vec2 pos = bezier_solver(); 
-    gl_Position = projection * view * vec4(vec3(pos, 0.0), 1.0);
+    vec4 world_pos = model * vec4(position, 1.0);
+    frag_pos = world_pos.xy;
+    gl_Position = projection * view * world_pos;
 }

@@ -16,6 +16,11 @@ struct vertex_buffer_object
     GLuint id;
 } typedef VBO;
 
+struct shader_storage_buffer_object
+{
+    GLuint id;
+} typedef SSBO;
+
 struct element_buffer_object
 {
     GLuint id;
@@ -37,6 +42,11 @@ void ebo_create(EBO *ebo_object, GLuint *indices, GLsizeiptr size);
 void ebo_bind(EBO *ebo_object);
 void ebo_unbind();
 void ebo_delete(EBO *ebo_object);
+
+void ssbo_create(SSBO *ssbo_object, s32 layout, void *data, s_size type_size, s_size arr_size);
+void ssbo_bind(SSBO *ssbo_object);
+void ssbo_unbind();
+void ssbo_delete(SSBO *ssbo_object);
 
 b8 shader_create(db_arena *arena, shader *shader, const char *vertex_path, const char *fragment_path);
 
