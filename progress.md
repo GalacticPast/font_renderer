@@ -7,113 +7,124 @@ stale sections rather than letting them rot.
 
 ## Current direction
 
-Implementing the **real Slug algorithm (Lengyel's technique)**, not the
-Loop-Blinn-style fan/FBO-resolve approach that was prototyped earlier and
-then intentionally deleted (see "Abandoned approach" below). Curve data for
-a glyph is uploaded once to an SSBO; the shader does the inside/outside
-curve-coverage test per fragment directly against that buffer, indexed by a
-`(curve_start, curve_count)` range.
+Implementing the **real Slug algorithm (Lengyel's technique)** via an SSBO of
+glyph curve data, with the actual inside/outside test done analytically in
+the fragment shader (ray-vs-quadratic-curve crossing count, even-odd fill
+rule) — not the earlier Loop-Blinn fan/FBO prototype, which was deliberately
+deleted. OpenGL is still explicitly **temporary**; the plan is to move to
+Vulkan once the Slug algorithm itself works, so keep effort weighted toward
+the API-agnostic parts (contour/curve extraction, the curve math) over
+GL-specific plumbing.
 
-OpenGL is explicitly **temporary** — the plan is to move to Vulkan once the
-Slug algorithm itself is working. Keep that in mind when deciding how much
-effort is worth sinking into GL-specific plumbing (SSBO setup, uniform
-wiring) vs. the API-agnostic parts (contour/curve extraction, the curve math
-itself), which are the parts that carry over.
+## Milestone reached: single glyph renders correctly, holes and all
 
-## What's working / verified
+Pressing nothing (default glyph index 0 = 'A') now renders a correct,
+solid-filled "A" via the full SSBO → fragment-shader pipeline: no debug
+line-strip, no CPU tessellation — the GPU is doing the actual curve-coverage
+test. Verified visually (`shader.jpg` screenshots) to have the right
+silhouette, correct triangular counter (hole) via the even-odd rule, and no
+stray artifacts, after fixing a nasty precision bug (see below).
+
+## How the pipeline works right now
 
 - `load_font` (`src/main.c`) parses all 26 uppercase letters via
-  `stbtt_GetGlyphShape`, correctly handling `STBTT_vmove` / `STBTT_vline` /
-  `STBTT_vcurve`, contour starts, and contour closure. Verified visually on
-  `B` and `S` (multiple contours, holes, mixed lines+curves) before the
-  reset described below.
-- `center_glyphs` centers glyph geometry on its bounding box.
-- Units: raw `stbtt` vertices are **font design units** (not "em units"),
-  converted to pixels via `stbtt_ScaleForMappingEmToPixels` →
-  `em_to_px_scale`, stored per-glyph.
-- Camera/projection: orthographic (`db_matrix4_ortho2d`), 1 world unit = 1
-  screen pixel. Centered on `[-W/2, W/2] x [-H/2, H/2]`, matching
-  `center_glyphs`.
-- `gl.c`/`gl.h` have working `VAO`/`VBO`/`EBO` wrappers plus a new `SSBO`
-  wrapper (`ssbo_create`/`ssbo_bind`/`ssbo_unbind`/`ssbo_delete`,
-  binding point 2). `shader_create` takes vertex/fragment paths as
-  parameters (no longer hardcoded).
+  `stbtt_GetGlyphShape` into `glyph_data.curves` (flat array of `{p0, p1
+  (control), p2}`, `db_vector4` each — lines are stored as degenerate
+  quadratics with `p1` = exact midpoint of `p0`/`p2`).
+- `center_glyphs` converts curve points from font design units to pixel
+  space (`em_to_px_scale`) and centers each glyph on its own bbox. It also
+  now stores `glyph_data.half_extent = (max - min) / 2` (pixel space), used
+  to size the glyph's quad.
+- One quad (`vertices`/`indices` in `main.c`, a plain `[-0.5, 0.5]` square)
+  is scaled per-frame by `camera_set_matrix`'s `model` matrix using
+  `half_extent * 2` so its world-space footprint matches the *currently
+  selected* glyph's bbox exactly. `view` and `projection` are a flat
+  identity-view orthographic setup (1 world unit = 1 pixel).
+- The vertex shader (`vertex.glsl`) passes the quad's world-space position
+  through as `frag_pos` — a glyph-local, pixel-space coordinate that lines
+  up directly with the curve data's own coordinate system.
+- `glyphs.data[0].curves` (currently hardcoded to glyph 0 = 'A') is uploaded
+  once via `ssbo_create(&b_ssbo, 1, glyphs.data[0].curves.data,
+  sizeof(curve), glyphs.data[0].curves.length)` to SSBO binding point `1`,
+  matching `layout(std430, binding = 1)` in both shaders.
+- The fragment shader (`fragment.glsl`) does the real Slug test: for each
+  curve, `horiz_ray_roots` solves `B_y(t) = frag_pos.y` (handling the
+  degenerate-line case separately from the general quadratic), then
+  `curve_x_at` evaluates `B_x(t)` at each valid root and counts it as a
+  crossing if it's ahead of `frag_pos.x`. Odd total crossings = inside
+  (filled white); even = `discard`.
 
-## Currently broken / mid-edit
+## Bug fixed this session: epsilon too tight on the degenerate-line check
 
-`src/main.c` does **not currently compile** — it's mid-refactor from the old
-CPU-tessellated line-strip debug renderer to the SSBO-based curve renderer:
+`horiz_ray_roots` detects "this curve is actually a straight line" via
+`abs(a) < epsilon` (where `a = p0.y - 2*p1.y + p2.y`, exactly `0` in theory
+for a line). The curve points go through `em_to_px_scale` multiply +
+centering subtraction before reaching the shader, and at pixel-space
+magnitudes (hundreds), accumulated float32 rounding pushed some nominally-
+exact-zero `a` values to around `1e-5` — past the original `1e-6` threshold.
+Those curves fell through to the full quadratic formula, where dividing by
+a near-zero `a` causes catastrophic cancellation and wildly unstable roots —
+visible as a small jagged notch cut into the solid fill near wherever a
+curve happened to accumulate enough rounding error. **Fixed** by widening
+the epsilon to `1e-3` in both the `a` and `b` checks in `fragment.glsl`.
 
-- `main()` (around main.c:284) calls `ssbo_create(&b_ssbo, glyphs.data[0].curves, ...)`
-  but the render loop below it (main.c:294-319) still references
-  `b_vbo`, `b_vertices`, and `contour_vertex_counts`, none of which are
-  declared anymore. This is leftover from the deleted debug path.
-- `assets/shaders/vertex.glsl` is a non-compiling sketch: `unifort` typo
-  (main.c sibling file, line 4), the `Curve` struct is missing its trailing
-  `;`, `curve_buffer` is declared as a flat `vec2 curves[]` instead of
-  `Curve curves[]`, and `bezier_solver()` references `t`/`p0`/`p1`/`p2`
-  which are never defined/passed in (no per-vertex attributes or SSBO index
-  lookup wired up yet).
-- `assets/shaders/curve_fragment.glsl` / `curve_vertex.glsl` are deleted
-  (part of the abandoned Loop-Blinn prototype, see below) — `gl.c` may still
-  reference them in cleanup code; check before assuming they're gone
-  everywhere.
+Diagnosis method worth remembering: when GPU output looks locally wrong but
+the overall shape is right, write a standalone CPU simulation (plain
+Python, no GPU/driver involved) of the exact same math against the exact
+curve data. If the simulation renders clean, the bug is GPU-side (precision,
+upload, binding) — not the algorithm or the data. That's what pinned this
+one down after visual guessing (shared-vertex theories, etc.) didn't pan
+out.
 
-None of this is a mystery bug — it's just unfinished plumbing from the
-current task in progress (see "Next step" below).
+## Known gaps / not yet done
 
-## Abandoned approach (don't resurrect without reason)
+1. **The SSBO is only ever uploaded once, for glyph 0 ('A').** Pressing `D`
+   cycles the selected glyph index `i` and *does* now correctly resize the
+   quad to that glyph's own `half_extent` — but the curve data in the SSBO
+   is never re-uploaded, so every letter still renders using 'A's curves
+   inside a correctly-sized-for-that-letter quad. This is the next concrete
+   bug to fix (see Next Steps).
+2. **Only real-curve (non-degenerate, `STBTT_vcurve`) rendering is
+   unverified.** 'A' happens to be built entirely out of straight lines
+   (every curve in it is a degenerate line), so the full quadratic-formula
+   branch of `horiz_ray_roots` has never actually been exercised visually.
+   Needs testing on a glyph with genuine curves (O, S, B, G) before trusting
+   it — and specifically re-checking that the widened `1e-3` epsilon doesn't
+   misclassify a real, gently-curved segment as a degenerate line.
+3. **No anti-aliasing yet** (Phase 7) — fill is a hard binary in/out test,
+   so diagonal edges show ordinary un-anti-aliased staircasing. Expected at
+   this stage; don't chase it before more glyphs are verified correct.
+4. **Nested/multiple holes untested** — only verified one hole (the "A"
+   counter). Per the roadmap's testing progression, still need to check
+   B/8/@ for correctly handling more than one nested contour.
+5. Minor cleanup items, not urgent: `ssbo_bind`/`ssbo_unbind`/`ssbo_delete`
+   (`gl.c`) are stub/no-op or arguably wrong (`ssbo_bind` calls
+   `glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0)`, which unbinds rather than
+   binds — harmless right now since the binding that actually matters is
+   the `glBindBufferBase` call already done in `ssbo_create`, but the
+   function doesn't do what its name says). No GL object cleanup
+   (VAO/VBO/EBO/SSBO) at shutdown, only `shader_destroy`.
+6. `STBTT_vcubic` case in `load_font` is an empty no-op — fine for
+   TrueType-only fonts (no cubics expected) but worth a comment if it stays
+   silently empty.
 
-An earlier working prototype used **Loop-Blinn fan triangulation + an FBO
-accumulation/resolve pass** (per-contour fan triangles, curve-correction
-triangles with UV-based `u²-v` coverage test, additive blend into an FBO,
-then a resolve shader). It worked end-to-end and rendered a correct
-anti-aliased "S". The user deliberately deleted all of it to instead
-implement the actual Slug/Lengyel algorithm, which does the curve test
-directly against an SSBO of curves rather than pre-triangulating fans. Don't
-reintroduce the fan/FBO machinery unless explicitly asked — it was a
-deliberate pivot, not an accident.
+## Next steps, smallest-first
 
-## Key bugs already fixed (watch for regressions of the same shape)
-
-- `db.h` had `db_max`/`db_min` macros (integer-only, `s64`-cast) that
-  **collided by name** with `db_math.h`'s float versions, silently
-  truncating float bbox comparisons through an `s64` cast → UBSan abort.
-  Renamed to `db_max_s64`/`db_min_s64` in `db.h`. If float min/max math
-  looks wrong anywhere, check for a similar silent macro shadowing first.
-- `-win_width / 2.0f` where `win_width` is `u32` wraps around (unsigned
-  negation), not a simple negative float. Cast to signed before negating.
-- `glGetShaderiv` vs `glGetProgramiv` — don't pass a program handle
-  (`glCreateProgram`) to a function that expects a shader object handle
-  (`glCreateShader`); wrong object type silently triggers
-  `GL_INVALID_OPERATION` (1282).
-- Duplicate/zero-length first contour: don't manually seed
-  `contours_start_indicies` with a `0` before the parse loop *and* let the
-  first `STBTT_vmove` push its own `0` — pick one.
-- `GL_LINE_STRIP`/`GL_LINE_LOOP` can't skip a stray connecting line between
-  disjoint contours by duplicating the last vertex (that trick only works
-  for degenerate zero-area triangles, not zero-length lines) — use
-  per-contour `glDrawArrays` calls (or `glMultiDrawArrays`) instead.
-
-## Next step
-
-Finish wiring the SSBO path in `main.c` + `vertex.glsl`:
-
-1. Fix `vertex.glsl`: proper `Curve` struct w/ semicolon, `curve_buffer`
-   declared as `Curve curves[]`, and decide how each vertex knows which
-   curve + `t` it corresponds to (per-vertex attributes, since
-   `curve_start`/`curve_count` uniforms only let you loop over a *range* in
-   the fragment shader for the coverage test — they don't by themselves
-   tell the vertex shader which single curve a given vertex belongs to).
-2. Rip out the dangling `b_vbo`/`b_vertices`/`contour_vertex_counts`
-   references in `main()`'s render loop, replace with whatever draw
-   strategy the finished SSBO design needs (likely one `glDrawArrays` call
-   per glyph, using `curve_start`/`curve_count` uniforms set right before
-   the draw).
-3. Get it building and rendering *one* glyph again (same acceptance bar as
-   before: no GL errors, visually correct outline) before expanding to all
-   26.
-
-Per `AGENTS.md`'s roadmap this is still Phase 4/5 (GPU data upload + GPU
-curve evaluation) — fill/coverage/anti-aliasing (Phase 6/7) comes after the
-SSBO plumbing works and renders *something* correct, even just outlines.
+1. **Fix glyph cycling to actually show the right letter.** When `D` is
+   pressed and `i` changes, re-upload (or `glBufferSubData`) that glyph's
+   `curves` into the SSBO, not just resize the quad. Simplest first pass:
+   just call `ssbo_create` again each time `i` changes (recreates the
+   buffer; fine for now, revisit if churn becomes a problem).
+2. **Verify real curves work**, not just lines: once cycling works, step
+   through to a glyph with actual `STBTT_vcurve` segments (O, S, or G) and
+   visually confirm the curved edges render smoothly and correctly through
+   the quadratic-formula branch of `horiz_ray_roots`.
+3. **Verify multiple/nested holes** on B, 8, or @ per the testing
+   progression in `AGENTS.md`.
+4. Once single-glyph rendering is solid across that test range, move to
+   **Phase 7 (anti-aliasing)** — don't start this before step 2/3 are clean,
+   per "correctness before optimization."
+5. Longer term (Phase 8 territory): pool multiple glyphs into one shared
+   SSBO with per-glyph `curve_start`/`curve_count` uniform ranges (the
+   design already discussed) to support rendering more than one glyph/draw
+   call at once — needed for actual text strings, advances, and batching.

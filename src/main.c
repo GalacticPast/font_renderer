@@ -44,15 +44,17 @@ db_array_decl(curves, curve);
 
 typedef struct
 {
-    f32             em_to_px_scale;
-    db_vector4      half_extent;
-    db_array_s32    curves_start_index;
-    db_array_curves curves;
+    f32        em_to_px_scale;
+    s32        index;
+    s32        curves_start_index;
+    s32        curves_end_index;
+    db_vector4 half_extent;
 } glyph_data;
 
 typedef struct
 {
-    glyph_data data[26];
+    glyph_data      data[26];
+    db_array_curves curves;
 } glyphs;
 
 void   camera_set_matrix(camera *camera, shader *shader, db_vector3 glyph_scale, f32 near_plane, f32 far_plane);
@@ -90,16 +92,15 @@ void center_glyphs(glyphs *g)
 {
     for (s32 j = 0; j < 26; j++)
     {
-        glyph_data *b           = &g->data[j];
-        db_vector4  min         = db_vector4_make(DB_MATH_F32_MAX, DB_MATH_F32_MAX, 0.0, 0.0);
-        db_vector4  max         = db_vector4_make(DB_MATH_F32_MIN, DB_MATH_F32_MIN, 0.0, 0.0);
-        s32         curves_size = b->curves.length;
+        glyph_data *b   = &g->data[j];
+        db_vector4  min = db_vector4_make(DB_MATH_F32_MAX, DB_MATH_F32_MAX, 0.0, 0.0);
+        db_vector4  max = db_vector4_make(DB_MATH_F32_MIN, DB_MATH_F32_MIN, 0.0, 0.0);
 
-        for (s32 i = 0; i < curves_size; i++)
+        for (s32 i = b->curves_start_index; i < b->curves_end_index; i++)
         {
-            db_vector4 *p0 = &b->curves.data[i].p0;
-            db_vector4 *p1 = &b->curves.data[i].p1;
-            db_vector4 *p2 = &b->curves.data[i].p2;
+            db_vector4 *p0 = &g->curves.data[i].p0;
+            db_vector4 *p1 = &g->curves.data[i].p1;
+            db_vector4 *p2 = &g->curves.data[i].p2;
 
             db_vector4 p0_px = db_vector4_multiply(*p0, b->em_to_px_scale);
             db_vector4 p1_px = db_vector4_multiply(*p1, b->em_to_px_scale);
@@ -115,11 +116,11 @@ void center_glyphs(glyphs *g)
         b->half_extent    = db_vector4_multiply(db_vector4_subtract(max, min), 0.5f);
 
         // center it
-        for (s32 i = 0; i < curves_size; i++)
+        for (s32 i = b->curves_start_index; i < b->curves_end_index; i++)
         {
-            db_vector4 *p0 = &b->curves.data[i].p0;
-            db_vector4 *p1 = &b->curves.data[i].p1;
-            db_vector4 *p2 = &b->curves.data[i].p2;
+            db_vector4 *p0 = &g->curves.data[i].p0;
+            db_vector4 *p1 = &g->curves.data[i].p1;
+            db_vector4 *p2 = &g->curves.data[i].p2;
 
             db_vector4 p0_px = db_vector4_multiply(*p0, b->em_to_px_scale);
             db_vector4 p1_px = db_vector4_multiply(*p1, b->em_to_px_scale);
@@ -159,6 +160,22 @@ int main()
     glyphs glyphs = load_font(&main_arena);
     center_glyphs(&glyphs);
 
+    // @debug: temporary - dump 'Q' curve data to find the horizontal-band bug. DELETE after fixed.
+    {
+        const char *dbg_letters[] = {"M", "J"};
+        for (s32 li = 0; li < 2; li++)
+        {
+            glyph_data *dbg = &glyphs.data[dbg_letters[li][0] - 'A'];
+            printf("[DEBUG GLYPH] %s\n", dbg_letters[li]);
+            for (s32 ci = dbg->curves_start_index; ci < dbg->curves_end_index; ci++)
+            {
+                curve *c = &glyphs.curves.data[ci];
+                printf("[DEBUG CURVE] %d: p0=(%.3f, %.3f) p1=(%.3f, %.3f) p2=(%.3f, %.3f)\n", ci, c->p0.x, c->p0.y,
+                       c->p1.x, c->p1.y, c->p2.x, c->p2.y);
+            }
+        }
+    }
+
     VAO  b_vao;
     VBO  b_vbo;
     EBO  b_ebo;
@@ -176,7 +193,7 @@ int main()
 
     vao_unbind();
 
-    ssbo_create(&b_ssbo, 1, glyphs.data[0].curves.data, sizeof(curve), glyphs.data[0].curves.length);
+    ssbo_create(&b_ssbo, 1, glyphs.curves.data, sizeof(curve), glyphs.curves.length);
     ssbo_bind(&b_ssbo);
 
     b8  run = true;
@@ -205,6 +222,11 @@ int main()
         db_vector3 glyph_scale = db_vector3_make(half_extent.x * 2.0f, half_extent.y * 2.0f, 1.0f);
 
         camera_set_matrix(&camera, &shader, glyph_scale, 0.1f, 100.0f);
+
+        // uniform vec2 curve_indicies;
+        u32        curve_loc = glGetUniformLocation(shader.program, "curve_indicies");
+        db_vector2 indicies  = db_vector2_make(glyphs.data[i].curves_start_index, glyphs.data[i].curves_end_index);
+        glUniform2fv(curve_loc, 1, indicies.data);
 
         vao_bind(&b_vao);
 
@@ -305,6 +327,7 @@ glyphs load_font(db_arena *arena)
     // Just checking "B"
 
     glyphs glyphs = {};
+    glyphs.curves = db_array_curves_init(arena);
 
     for (s32 i = 0; i < 26; i++)
     {
@@ -315,18 +338,15 @@ glyphs load_font(db_arena *arena)
 
         glyph_data *g_data = &glyphs.data[i];
 
-        g_data->curves             = db_array_curves_init(arena);
-        g_data->curves_start_index = db_array_s32_init(arena);
         g_data->em_to_px_scale     = stbtt_ScaleForMappingEmToPixels(&font_info, FONT_SIZE);
-
-        db_vector4 curr_point = db_vector4_zero();
+        g_data->curves_start_index = glyphs.curves.length;
+        db_vector4 curr_point      = db_vector4_zero();
 
         for (int i = 0; i < vertices_size; i++)
         {
             switch (vertices[i].type)
             {
                 case STBTT_vmove: {
-                    db_array_s32_append(&g_data->curves_start_index, g_data->curves.length);
                     curr_point.x = vertices[i].x;
                     curr_point.y = vertices[i].y;
                 }
@@ -336,7 +356,7 @@ glyphs load_font(db_arena *arena)
                     db_vector4 control_p =
                         db_vector4_make((p_2.x + curr_point.x) * 0.5f, (p_2.y + curr_point.y) * 0.5f, 0.0, 0.0);
                     curve c = {.p0 = curr_point, .p1 = control_p, .p2 = p_2};
-                    db_array_curves_append(&g_data->curves, c);
+                    db_array_curves_append(&glyphs.curves, c);
                     curr_point = p_2;
                 }
                 break;
@@ -344,7 +364,7 @@ glyphs load_font(db_arena *arena)
                     db_vector4 p_2       = db_vector4_make(vertices[i].x, vertices[i].y, 0.0, 0.0);
                     db_vector4 control_p = db_vector4_make(vertices[i].cx, vertices[i].cy, 0.0, 0.0);
                     curve      c         = {.p0 = curr_point, .p1 = control_p, .p2 = p_2};
-                    db_array_curves_append(&g_data->curves, c);
+                    db_array_curves_append(&glyphs.curves, c);
                     curr_point = p_2;
                 }
                 break;
@@ -353,8 +373,8 @@ glyphs load_font(db_arena *arena)
                 break;
             }
         }
+        g_data->curves_end_index = glyphs.curves.length;
         stbtt_FreeShape(&font_info, vertices);
     }
-
     return glyphs;
 }

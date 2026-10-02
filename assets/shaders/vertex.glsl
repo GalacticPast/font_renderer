@@ -17,6 +17,8 @@ uniform mat4 projection;
 uniform mat4 view;
 uniform mat4 model;
 
+uniform vec2 curve_indicies;
+
 out vec2 frag_pos;
 
 void main()
