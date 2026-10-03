@@ -160,22 +160,6 @@ int main()
     glyphs glyphs = load_font(&main_arena);
     center_glyphs(&glyphs);
 
-    // @debug: temporary - dump 'Q' curve data to find the horizontal-band bug. DELETE after fixed.
-    {
-        const char *dbg_letters[] = {"M", "J"};
-        for (s32 li = 0; li < 2; li++)
-        {
-            glyph_data *dbg = &glyphs.data[dbg_letters[li][0] - 'A'];
-            printf("[DEBUG GLYPH] %s\n", dbg_letters[li]);
-            for (s32 ci = dbg->curves_start_index; ci < dbg->curves_end_index; ci++)
-            {
-                curve *c = &glyphs.curves.data[ci];
-                printf("[DEBUG CURVE] %d: p0=(%.3f, %.3f) p1=(%.3f, %.3f) p2=(%.3f, %.3f)\n", ci, c->p0.x, c->p0.y,
-                       c->p1.x, c->p1.y, c->p2.x, c->p2.y);
-            }
-        }
-    }
-
     VAO  b_vao;
     VBO  b_vbo;
     EBO  b_ebo;
@@ -195,6 +179,11 @@ int main()
 
     ssbo_create(&b_ssbo, 1, glyphs.curves.data, sizeof(curve), glyphs.curves.length);
     ssbo_bind(&b_ssbo);
+
+    // glyph edges now output fractional alpha for anti-aliasing; without
+    // blending enabled that alpha is ignored and edges stay hard.
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     b8  run = true;
     s32 i   = 0;

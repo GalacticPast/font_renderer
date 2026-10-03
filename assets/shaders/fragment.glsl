@@ -71,24 +71,54 @@ float curve_x_at(Curve curve, float t)
            t * t * (curve.p0.x - 2.0 * curve.p1.x + curve.p2.x);
 }
 
+// d(B_y)/dt at an already-known t - tells us whether the curve is crossing
+// the ray height with y increasing or decreasing in t. The Slug paper uses
+// this to assign a crossing's sign in the winding number instead of
+// even-odd parity: a crossing where y is decreasing through the ray
+// contributes +1, one where y is increasing contributes -1. (This sign
+// convention only has to be consistent with the font's own contour winding -
+// if glyphs with holes render inverted, flip both signs below.)
+float curve_y_slope_at(Curve curve, float t)
+{
+    float a = curve.p0.y - 2.0 * curve.p1.y + curve.p2.y;
+    float b = 2.0 * (curve.p1.y - curve.p0.y);
+    return 2.0 * a * t + b;
+}
+
+// Signed, fractional contribution of one ray-curve crossing to the pixel's
+// coverage (Slug paper, eq. 3): instead of a flat +-1 winding contribution,
+// scale it by how close the crossing is to this ray's x, saturated to
+// [0, 1]. That turns a binary winding number into continuous coverage,
+// which is what makes the edge anti-aliased. Curve data here is already in
+// pixel space (see center_glyphs), so the paper's font-size scale factor is
+// implicitly 1 for us.
+float signed_coverage(Curve curve, float t, float ray_x)
+{
+    float f           = clamp((curve_x_at(curve, t) - ray_x) + 0.5, 0.0, 1.0);
+    float winding_sign = (curve_y_slope_at(curve, t) < 0.0) ? 1.0 : -1.0;
+    return winding_sign * f;
+}
+
 void main()
 {
     float ray_y = frag_pos.y + RAY_Y_NUDGE;
 
-    int crossings = 0;
+    float coverage = 0.0;
     for (int i = int(curve_indicies.x); i < int(curve_indicies.y); i++)
     {
         Curve curve = curves[i];
         vec2  roots = horiz_ray_roots(curve, ray_y);
 
-        if (roots.x >= 0.0 && curve_x_at(curve, roots.x) > frag_pos.x)
-            crossings++;
-        if (roots.y >= 0.0 && curve_x_at(curve, roots.y) > frag_pos.x)
-            crossings++;
+        if (roots.x >= 0.0)
+            coverage += signed_coverage(curve, roots.x, frag_pos.x);
+        if (roots.y >= 0.0)
+            coverage += signed_coverage(curve, roots.y, frag_pos.x);
     }
 
-    if (crossings % 2 == 0)
+    float alpha = clamp(abs(coverage), 0.0, 1.0);
+
+    if (alpha <= 0.0)
         discard;
 
-    FragColor = vec4(vec3(1.0), 1.0);
+    FragColor = vec4(vec3(1.0), alpha);
 }
