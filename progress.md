@@ -7,21 +7,37 @@ stale sections rather than letting them rot.
 
 ## Current direction
 
-Real Slug algorithm (Lengyel's technique): one shared SSBO of all glyphs'
-curves, analytic ray-vs-quadratic-curve crossing test in the fragment
-shader, even-odd fill rule. OpenGL is still temporary (Vulkan planned once
-Slug itself works).
+Real Slug algorithm (Lengyel, JCGT 2017): one shared SSBO of all glyphs'
+curves, one horizontal ray per fragment, signed (nonzero) winding number with
+fractional anti-aliased contributions. OpenGL is still temporary (Vulkan
+planned once Slug itself works).
 
-## Milestone: multiple glyphs render correctly, cycling works
+Phases 1–7 are done (glyph extraction, curve representation, debug rendering,
+GPU data, GPU curve evaluation, fill determination, anti-aliasing). Phase 8
+(text layout) is next.
 
-All 26 uppercase letters are pooled into one `db_array_curves` on `glyphs`
-(not per-glyph arrays anymore). Each `glyph_data` stores
-`curves_start_index`/`curves_end_index` (absolute indices into the shared
-pool) plus `half_extent`. Pressing `D` cycles the selected glyph and now
-correctly re-sizes the quad *and* re-points the fragment shader at that
-glyph's own curve range via the `curve_indicies` uniform — both the quad and
-the curve data now follow the same `i`. Verified clean on A, S, Q, O, M, J
-(mix of straight-line-only, round, and hook/tail glyphs).
+## Milestone: anti-aliased, signed-winding fill
+
+Replaced even-odd parity + 2×2 grid supersampling with the paper's analytic
+method, in `fragment.glsl`:
+
+- `horiz_ray_roots` finds up to two roots of `B_y(t) = ray_y` in `[0, 1)`.
+- `curve_y_slope_at` gives `d(B_y)/dt` at a root; its sign sets the winding
+  contribution (`y` decreasing → +1, increasing → −1).
+- `signed_coverage` returns `winding_sign * f`, with
+  `f = clamp((crossing_x - frag_pos.x) + 0.5, 0, 1)`. Curve data is already in
+  pixel space, so the paper's `m` (pixels-per-em) term is implicitly 1.
+- `main()` sums contributions, `alpha = clamp(abs(coverage), 0, 1)`, and
+  discards only when alpha is exactly 0.
+
+Verified visually (`bin/slug`, Wayland):
+- `A`: solid fill, inner triangular counter renders as background, edges show
+  real multi-level gray ramps (not hard 0/255).
+- `S`: fills correctly; vertical-ish edges are smooth.
+- `B`: both counters render as holes, no sign inversion.
+
+Blending is enabled in `main.c` (`GL_BLEND`, `GL_SRC_ALPHA`,
+`GL_ONE_MINUS_SRC_ALPHA`) — required, or the fractional alpha is ignored.
 
 ## How it works (current architecture)
 
@@ -29,75 +45,64 @@ the curve data now follow the same `i`. Verified clean on A, S, Q, O, M, J
   `glyphs.curves` array; each `glyph_data` records its own
   `[curves_start_index, curves_end_index)` slice.
 - `center_glyphs` converts each glyph's slice to pixel space
-  (`em_to_px_scale`) and centers it on its own bbox; also computes
+  (`em_to_px_scale`) and re-centers it on its own bbox; also computes
   `half_extent = (max - min) / 2`.
 - One reusable quad is scaled per-frame to `half_extent * 2` so its
   world-space footprint matches whichever glyph is selected.
-- `main()` uploads the *entire* pooled `glyphs.curves` to one SSBO
-  (`binding = 1`) once, and sets the `curve_indicies` uniform
-  (`vec2(start_index, end_index)`) per-frame to tell the fragment shader
-  which slice belongs to the current glyph.
-- `vertex.glsl` passes the quad's world-space position through as
-  `frag_pos` (pixel-space, matching the curve data's coordinate system).
-- `fragment.glsl` does the real test: for each curve in
-  `[curve_indicies.x, curve_indicies.y)`, solve `B_y(t) = ray_y`
-  (`horiz_ray_roots`), evaluate `B_x(t)` for each valid root
-  (`curve_x_at`), count it as a crossing if it's ahead of `frag_pos.x`.
-  Odd crossings = inside (fill white); even = `discard`.
+- `main()` uploads the entire pooled `glyphs.curves` to one SSBO
+  (`binding = 1`) once, and sets the `curve_indicies` uniform per-frame to
+  tell the fragment shader which slice belongs to the current glyph.
+- `vertex.glsl` passes the quad's world-space position through as `frag_pos`
+  (pixel-space, orthographic projection 1:1 with window pixels).
 
-## Bug fixed this session: ray-through-shared-vertex, fixed via ray nudge
+## Known gaps / accepted limitations
 
-Symptom: thin horizontal bands cutting across otherwise-correct glyphs (seen
-on S, O, Q, M, J at different heights each).
+1. **Anisotropic AA.** Smoothing only happens along the ray direction (x).
+   Near-horizontal edges and tangent points stay jagged (measured on the top
+   of `S`'s inner curve: ~one hard jump instead of a ramp). Accepted for now.
+   Fix would be a second ray direction or supersampling, as the paper suggests.
+2. **`RAY_Y_NUDGE`** (`fragment.glsl`) is still a probabilistic workaround for
+   rays passing exactly through shared vertices. The paper solves this exactly
+   with a sign-based lookup table (`0x2E74`, 8 equivalence classes) — worth
+   revisiting.
+3. **Winding sign unverified against the font's contour direction in general.**
+   The `y decreasing → +1` choice works for A/S/B, so flip both signs in
+   `signed_coverage` if a future glyph renders inverted.
+4. Only uppercase A–Z loaded; no lowercase, digits, punctuation, layout, or
+   batching.
+5. `center_glyphs` re-centers each glyph on its own bbox, which discards the
+   baseline-relative position that Phase 8 layout needs.
+6. Minor cleanup, not urgent: `ssbo_bind`/`ssbo_unbind`/`ssbo_delete` (`gl.c`)
+   are stub/no-op or arguably wrong (`ssbo_bind` unbinds rather than binds —
+   harmless since the binding that matters is `glBindBufferBase` in
+   `ssbo_create`). No GL object cleanup (VAO/VBO/EBO/SSBO) at shutdown, only
+   `shader_destroy`.
+7. `STBTT_vcubic` case in `load_font` is an empty no-op — fine for TrueType.
 
-Root cause: the ray-crossing test is ambiguous exactly when the ray height
-equals a vertex shared by two adjacent curves — one curve should "own" that
-crossing, the other shouldn't, or the parity flips for every pixel in that
-row. Font curve coordinates are suspiciously round numbers, so exact vertex
-hits are common here, not a rare edge case.
+## Bug history (reusable lessons)
 
-Dead ends tried first: widening the discriminant-near-zero threshold, and an
-asymmetric "lower-y endpoint owns the vertex" rule with its own epsilon.
-Each fix solved whichever letter was being tested and broke a different one
-— a sign that epsilon-tuning was the wrong approach (the right threshold
-depends on each glyph's specific geometry).
+**Ray-through-shared-vertex bands.** Symptom: thin horizontal bands across
+otherwise-correct glyphs. Cause: the crossing test is ambiguous when the ray
+height equals a vertex shared by two curves, and font coordinates are round
+numbers so exact hits are common. Epsilon-tuning and vertex-ownership rules
+each fixed one letter and broke another. Current workaround: nudge the ray
+height by `RAY_Y_NUDGE = 0.0317` (see gap 2).
 
-**Actual fix**: nudge the ray height by a small fixed, non-round offset
-(`RAY_Y_NUDGE = 0.0317` in `fragment.glsl`) before doing any curve math, so
-landing exactly on a vertex becomes vanishingly unlikely. This let all the
-special-case vertex-ownership logic be deleted in favor of the plain,
-standard half-open interval rule (`t >= 0.0 && t < 1.0`).
-
-Diagnosis method worth reusing: extract the real curve data for the broken
-glyph (temporary `printf` dump in `load_font`/after `center_glyphs`) and
-replicate the exact ray-crossing math in a standalone Python script, no GPU
-involved. If the simulation is clean, the bug is GPU-side (precision,
-upload, binding); if the simulation reproduces it, the bug is in the
-math/data and can be iterated on much faster outside the GL/shader
-edit-build-run loop.
-
-## Known gaps / not yet done
-
-1. **No anti-aliasing yet** (Phase 7) — binary in/out fill, so diagonal
-   edges show ordinary un-anti-aliased staircasing. Expected at this stage.
-2. Only uppercase A-Z loaded; no lowercase, digits, punctuation, kerning,
-   layout, or batching (Phase 8 territory).
-3. Minor cleanup, not urgent: `ssbo_bind`/`ssbo_unbind`/`ssbo_delete`
-   (`gl.c`) are stub/no-op or arguably wrong (`ssbo_bind` unbinds rather
-   than binds — harmless since the binding that matters is the
-   `glBindBufferBase` call in `ssbo_create`). No GL object cleanup
-   (VAO/VBO/EBO/SSBO) at shutdown, only `shader_destroy`.
-4. `STBTT_vcubic` case in `load_font` is an empty no-op — fine for
-   TrueType-only fonts (no cubics expected).
+**Diagnosis method:** dump the real curve data for the broken glyph and replicate
+the ray-crossing math in a standalone Python script, no GPU. If the simulation
+is clean, the bug is GPU-side (precision, upload, binding); if it reproduces,
+it's in the math/data and iterates much faster outside the edit-build-run loop.
 
 ## Next steps, smallest-first
 
-1. **Finish verifying all 26 letters** cycle cleanly (A/S/Q/O/M/J already
-   confirmed; worth a quick pass through the rest, especially ones with
-   multiple holes like B).
-2. Test glyphs with **more than one hole** (B, 8-equivalent if digits get
-   added, @) to confirm nested-contour even-odd fill still holds up.
-3. Once that's solid, move to **Phase 7 (anti-aliasing)** — not before.
-4. Longer term: extend the pooled-SSBO/`curve_indicies` design (already in
-   place) to render more than one glyph per draw call, for actual text
-   strings — advances, kerning, batching (Phase 8).
+1. **Phase 8 design first.** Decide the baseline/origin convention and how
+   `center_glyphs` changes (gap 5). Check `stb_truetype.h` comments on
+   `stbtt_GetGlyphShape` and `stbtt_GetGlyphHMetrics` for the exact coordinate
+   semantics rather than assuming them.
+2. Extract advance width and left side bearing per glyph
+   (`stbtt_GetGlyphHMetrics`), converted with `em_to_px_scale`.
+3. Extend `camera_set_matrix` (or the model matrix) with a per-glyph pen
+   translation, in addition to the existing scale.
+4. Milestone: two glyphs side by side with correct spacing from real advances.
+   Then a full string, then kerning (`stbtt_GetCodepointKernAdvance`), then
+   batching (one draw call for many glyphs).

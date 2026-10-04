@@ -1,20 +1,12 @@
-#define DB_IMPLEMENTATION
-#define DB_MATH_IMPLEMENTATION
-#define STB_TRUETYPE_IMPLEMENTATION
-
-#include "../vendor/stb/stb_truetype.h"
-#include "db.h"
-#include "db_math.h"
 #include "gl.h"
 #include "input.h"
 #include "platform/platform.h"
+#include "text.h"
 
 #define ONE_TWENTIETH 0.05f
 
 #define WINDOW_WIDTH 600
 #define WINDOW_HEIGHT 400
-
-#define FONT_SIZE 300
 
 typedef struct camera
 {
@@ -33,33 +25,8 @@ db_array_decl(vector2, db_vector2);
 db_array_decl(s32, s32);
 db_array_decl(f32, f32);
 
-typedef struct
-{
-    db_vector4 p0;
-    db_vector4 p1; // control
-    db_vector4 p2;
-} curve;
-
-db_array_decl(curves, curve);
-
-typedef struct
-{
-    f32        em_to_px_scale;
-    s32        index;
-    s32        curves_start_index;
-    s32        curves_end_index;
-    db_vector4 half_extent;
-} glyph_data;
-
-typedef struct
-{
-    glyph_data      data[26];
-    db_array_curves curves;
-} glyphs;
-
-void   camera_set_matrix(camera *camera, shader *shader, db_vector3 glyph_scale, f32 near_plane, f32 far_plane);
-b8     update(db_arena *main_arena);
-glyphs load_font(db_arena *arena);
+void camera_set_matrix(camera *camera, shader *shader, db_vector3 glyph_scale, f32 near_plane, f32 far_plane);
+b8   update(db_arena *main_arena);
 
 static inline db_matrix4 mat4_perspective(f32 fov_radians, f32 aspect_ratio, f32 near_clip, f32 far_clip);
 static inline db_matrix4 mat4_look_at(db_vector3 position, db_vector3 target, db_vector3 up);
@@ -88,51 +55,6 @@ u32 indices[] =
 };
 // clang-format on
 
-void center_glyphs(glyphs *g)
-{
-    for (s32 j = 0; j < 26; j++)
-    {
-        glyph_data *b   = &g->data[j];
-        db_vector4  min = db_vector4_make(DB_MATH_F32_MAX, DB_MATH_F32_MAX, 0.0, 0.0);
-        db_vector4  max = db_vector4_make(DB_MATH_F32_MIN, DB_MATH_F32_MIN, 0.0, 0.0);
-
-        for (s32 i = b->curves_start_index; i < b->curves_end_index; i++)
-        {
-            db_vector4 *p0 = &g->curves.data[i].p0;
-            db_vector4 *p1 = &g->curves.data[i].p1;
-            db_vector4 *p2 = &g->curves.data[i].p2;
-
-            db_vector4 p0_px = db_vector4_multiply(*p0, b->em_to_px_scale);
-            db_vector4 p1_px = db_vector4_multiply(*p1, b->em_to_px_scale);
-            db_vector4 p2_px = db_vector4_multiply(*p2, b->em_to_px_scale);
-
-            min.x = db_min(db_min3(p0_px.x, p1_px.x, p2_px.x), min.x);
-            min.y = db_min(db_min3(p0_px.y, p1_px.y, p2_px.y), min.y);
-
-            max.x = db_max(db_max3(p0_px.x, p1_px.x, p2_px.x), max.x);
-            max.y = db_max(db_max3(p0_px.y, p1_px.y, p2_px.y), max.y);
-        }
-        db_vector4 center = db_vector4_multiply(db_vector4_add(min, max), 0.5f);
-        b->half_extent    = db_vector4_multiply(db_vector4_subtract(max, min), 0.5f);
-
-        // center it
-        for (s32 i = b->curves_start_index; i < b->curves_end_index; i++)
-        {
-            db_vector4 *p0 = &g->curves.data[i].p0;
-            db_vector4 *p1 = &g->curves.data[i].p1;
-            db_vector4 *p2 = &g->curves.data[i].p2;
-
-            db_vector4 p0_px = db_vector4_multiply(*p0, b->em_to_px_scale);
-            db_vector4 p1_px = db_vector4_multiply(*p1, b->em_to_px_scale);
-            db_vector4 p2_px = db_vector4_multiply(*p2, b->em_to_px_scale);
-
-            *p0 = db_vector4_subtract(p0_px, center);
-            *p1 = db_vector4_subtract(p1_px, center);
-            *p2 = db_vector4_subtract(p2_px, center);
-        }
-    }
-}
-
 int main()
 {
     // startup the opengl context;
@@ -157,8 +79,7 @@ int main()
     if (!a)
         return false;
 
-    glyphs glyphs = load_font(&main_arena);
-    center_glyphs(&glyphs);
+    text_load_font(&main_arena, "../assets/font/Archivo-Regular.ttf");
 
     VAO  b_vao;
     VBO  b_vbo;
@@ -176,9 +97,6 @@ int main()
     // for now render A
 
     vao_unbind();
-
-    ssbo_create(&b_ssbo, 1, glyphs.curves.data, sizeof(curve), glyphs.curves.length);
-    ssbo_bind(&b_ssbo);
 
     // glyph edges now output fractional alpha for anti-aliasing; without
     // blending enabled that alpha is ignored and edges stay hard.
@@ -301,69 +219,4 @@ b8 update(db_arena *main_arena)
         return false;
     }
     return true;
-}
-
-glyphs load_font(db_arena *arena)
-{
-    db_file_contents font_content =
-        db_file_read_contents(arena, db_file_mode_rb, 0, "../assets/font/Archivo-Regular.ttf");
-    ASSERT_WITH_MSG(font_content.size, "couldnt read the font.");
-
-    stbtt_fontinfo font_info = {};
-    b8             res       = stbtt_InitFont(&font_info, font_content.data, 0);
-    ASSERT_WITH_MSG(res, "font loeading failed");
-
-    // Just checking "B"
-
-    glyphs glyphs = {};
-    glyphs.curves = db_array_curves_init(arena);
-
-    for (s32 i = 0; i < 26; i++)
-    {
-        s32 glyph_index = stbtt_FindGlyphIndex(&font_info, (s32)('A' + i));
-
-        stbtt_vertex *vertices      = NULL;
-        b32           vertices_size = stbtt_GetGlyphShape(&font_info, glyph_index, &vertices);
-
-        glyph_data *g_data = &glyphs.data[i];
-
-        g_data->em_to_px_scale     = stbtt_ScaleForMappingEmToPixels(&font_info, FONT_SIZE);
-        g_data->curves_start_index = glyphs.curves.length;
-        db_vector4 curr_point      = db_vector4_zero();
-
-        for (int i = 0; i < vertices_size; i++)
-        {
-            switch (vertices[i].type)
-            {
-                case STBTT_vmove: {
-                    curr_point.x = vertices[i].x;
-                    curr_point.y = vertices[i].y;
-                }
-                break;
-                case STBTT_vline: {
-                    db_vector4 p_2 = db_vector4_make(vertices[i].x, vertices[i].y, 0.0, 0.0);
-                    db_vector4 control_p =
-                        db_vector4_make((p_2.x + curr_point.x) * 0.5f, (p_2.y + curr_point.y) * 0.5f, 0.0, 0.0);
-                    curve c = {.p0 = curr_point, .p1 = control_p, .p2 = p_2};
-                    db_array_curves_append(&glyphs.curves, c);
-                    curr_point = p_2;
-                }
-                break;
-                case STBTT_vcurve: {
-                    db_vector4 p_2       = db_vector4_make(vertices[i].x, vertices[i].y, 0.0, 0.0);
-                    db_vector4 control_p = db_vector4_make(vertices[i].cx, vertices[i].cy, 0.0, 0.0);
-                    curve      c         = {.p0 = curr_point, .p1 = control_p, .p2 = p_2};
-                    db_array_curves_append(&glyphs.curves, c);
-                    curr_point = p_2;
-                }
-                break;
-                case STBTT_vcubic: {
-                }
-                break;
-            }
-        }
-        g_data->curves_end_index = glyphs.curves.length;
-        stbtt_FreeShape(&font_info, vertices);
-    }
-    return glyphs;
 }
