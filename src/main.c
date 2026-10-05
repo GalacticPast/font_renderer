@@ -108,7 +108,7 @@ int main()
 
     const char *string = "ABCDEFGHIJ";
 
-    f32 pen_pos[2] = {-0.643f, -0.343f};
+    f32 pen_pos[2] = {0, 40}; // px from the top-left, baseline sits 100 px down
 
     while (run)
     {
@@ -130,7 +130,7 @@ int main()
 
         glUniform1f(glGetUniformLocation(shader.program, "font_px"), font_px);
 
-        // pen cursor for this frame, in em. Advances by each glyph's advance width
+        // pen cursor for this frame, in px like the other UI positions. Converted to em only when uploaded
         db_vector2 pen = db_vector2_make(pen_pos[0], pen_pos[1]);
 
         for (s32 j = 0; j < 11; j++)
@@ -143,7 +143,8 @@ int main()
 
             camera_set_matrix(&camera, &shader, glyph_center, glyph_scale, 0.1f, 100.0f);
 
-            glUniform2f(glGetUniformLocation(shader.program, "pen_offset"), pen.x, pen.y);
+            // the shader works in em, so convert the px pen before uploading it
+            glUniform2f(glGetUniformLocation(shader.program, "pen_offset"), pen.x / font_px, pen.y / font_px);
 
             // uniform vec2 curve_indicies;
             u32        curve_loc = glGetUniformLocation(shader.program, "curve_indicies");
@@ -154,7 +155,7 @@ int main()
 
             glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 
-            pen.x += glyphs->data[c].advance;
+            pen.x += glyphs->data[c].advance * font_px;
         }
 
         platform_swap_buffers();
@@ -171,8 +172,7 @@ void camera_set_matrix(camera *camera, shader *shader, db_vector3 glyph_center, 
     u32 view_loc       = glGetUniformLocation(shader->program, "view");
 
     db_matrix4 ortho;
-    db_matrix4_ortho2d(&ortho, -(f32)WINDOW_WIDTH / 2.0f, (f32)WINDOW_WIDTH / 2.0f, -(f32)WINDOW_HEIGHT / 2.0f,
-                       (f32)WINDOW_HEIGHT / 2.0f);
+    db_matrix4_ortho2d(&ortho, 0, (f32)WINDOW_WIDTH, (f32)WINDOW_HEIGHT, 0);
 
     db_matrix4 view;
     db_matrix4_identity(&view);

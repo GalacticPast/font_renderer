@@ -26,3 +26,5 @@ typedef struct
 } glyphs;
 
 glyphs *text_load_font(db_arena *arena, const char *file_path);
+
+void text_draw_text();

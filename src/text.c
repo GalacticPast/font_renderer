@@ -106,7 +106,7 @@ glyphs *text_load_font(db_arena *arena, const char *file_path)
     return &state->glyphs;
 }
 
-f32 solve_bezier(f32 a, f32 b, f32 c, f32 t)
+static f32 solve_bezier(f32 a, f32 b, f32 c, f32 t)
 {
     // (1 - t)^2 a, + 2 * t * ( 1 - t) * b + t * t * c
     f32 ans = (1 - t) * (1 - t) * a + 2 * t * (1 - t) * b + t * t * c;

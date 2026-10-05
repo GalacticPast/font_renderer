@@ -29,7 +29,9 @@ void main()
     vec4 glyph_pos = model * vec4(position, 1.0);
     frag_pos = glyph_pos.xy;
 
-    // em -> pixels, for placing the vertex on screen only
-    vec4 pixel_pos = vec4((glyph_pos.xy + pen_offset) * font_px, 0.0, 1.0);
+    // em -> pixels, for placing the vertex on screen only. The screen is top-left origin (y down) but font
+    // outlines are y up, so the glyph's y is flipped here, not in the projection, to keep the UI convention
+    vec2 pixel_xy = vec2(glyph_pos.x + pen_offset.x, pen_offset.y - glyph_pos.y) * font_px;
+    vec4 pixel_pos = vec4(pixel_xy, 0.0, 1.0);
     gl_Position    = projection * view * pixel_pos;
 }
