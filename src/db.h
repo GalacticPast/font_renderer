@@ -368,9 +368,9 @@ dynamic arrays
 
 typedef struct db_array_skeleton
 {
-    s64       total_length;
-    s64       length;
-    s64       type_size;
+    s_size    total_length;
+    s_size    length;
+    s_size    type_size;
     db_arena *arena;
     void     *data;
 } db_array_skeleton;

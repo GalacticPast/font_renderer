@@ -79,7 +79,7 @@ int main()
     if (!a)
         return false;
 
-    text_load_font(&main_arena, "../assets/font/Archivo-Regular.ttf");
+    glyphs *glyphs = text_load_font(&main_arena, "../assets/font/Archivo-Regular.ttf");
 
     VAO  b_vao;
     VBO  b_vbo;
@@ -105,6 +105,7 @@ int main()
 
     b8  run = true;
     s32 i   = 0;
+    s32 mod = '~' - '!';
     while (run)
     {
         input_update(0);
@@ -114,7 +115,7 @@ int main()
         if (input_is_key_down(KEY_D) && !input_was_key_down(KEY_D))
         {
             i++;
-            i %= 26;
+            i %= mod;
         }
 
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -123,16 +124,14 @@ int main()
 
         shader_use(&shader);
 
-        // quad vertices span [-0.5, 0.5], so scaling by 2x the half-extent
-        // makes the quad's world-space half-width/half-height match the glyph's.
-        db_vector4 half_extent = glyphs.data[i].half_extent;
-        db_vector3 glyph_scale = db_vector3_make(half_extent.x * 2.0f, half_extent.y * 2.0f, 1.0f);
+        db_vector2 half_extent = glyphs->data[i].aabb.half_size;
+        db_vector3 glyph_scale = db_vector3_make(half_extent.x * 2.0, half_extent.y * 2.0f, 1.0f);
 
         camera_set_matrix(&camera, &shader, glyph_scale, 0.1f, 100.0f);
 
         // uniform vec2 curve_indicies;
         u32        curve_loc = glGetUniformLocation(shader.program, "curve_indicies");
-        db_vector2 indicies  = db_vector2_make(glyphs.data[i].curves_start_index, glyphs.data[i].curves_end_index);
+        db_vector2 indicies  = db_vector2_make(glyphs->data[i].curves_start_index, glyphs->data[i].curves_end_index);
         glUniform2fv(curve_loc, 1, indicies.data);
 
         vao_bind(&b_vao);

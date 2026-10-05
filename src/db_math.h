@@ -115,11 +115,11 @@ typedef struct db_rect3
 
 typedef struct db_aabb2
 {
-    db_vector2 centre, half_size;
+    db_vector2 center, half_size;
 } db_aabb2;
 typedef struct db_aabb3
 {
-    db_vector3 centre, half_size;
+    db_vector3 center, half_size;
 } db_aabb3;
 
 #if defined(_MSC_VER)
@@ -385,7 +385,7 @@ extern "C"
     static inline void db_matrix4_perspective(db_matrix4 *out, f32 fovy, f32 aspect, f32 z_near, f32 z_far);
     static inline void db_matrix4_infinite_perspective(db_matrix4 *out, f32 fovy, f32 aspect, f32 z_near);
 
-    static inline void db_matrix4_look_at(db_matrix4 *out, db_vector3 eye, db_vector3 centre, db_vector3 up);
+    static inline void db_matrix4_look_at(db_matrix4 *out, db_vector3 eye, db_vector3 center, db_vector3 up);
 
     static inline db_quaternion db_quaternion_make(f32 x, f32 y, f32 z, f32 w);
     static inline db_quaternion db_quaternion_from_array(f32 e[4]);
@@ -2427,12 +2427,12 @@ static inline void db_matrix4_infinite_perspective(db_matrix4 *out, f32 fovy, f3
     m[3][2] = -2.0f * z_near;
 }
 
-static inline void db_matrix4_look_at(db_matrix4 *out, db_vector3 eye, db_vector3 centre, db_vector3 up)
+static inline void db_matrix4_look_at(db_matrix4 *out, db_vector3 eye, db_vector3 center, db_vector3 up)
 {
     db_vector3 f, s, u;
     db_float4 *m;
 
-    db__vector3_subtract(&f, centre, eye);
+    db__vector3_subtract(&f, center, eye);
     db__vector3_normalize(&f, f);
 
     db__vector3_cross(&s, f, up);

@@ -11,17 +11,17 @@ db_array_decl(curves, curve);
 
 typedef struct
 {
-    f32        em_to_px_scale;
-    s32        curves_start_index;
-    s32        curves_end_index;
-    db_vector4 half_extent;
+    s32      curves_start_index;
+    s32      curves_end_index;
+    db_aabb2 aabb;
 } glyph_data;
 
 typedef struct
 {
     const char     *font_name;
-    glyph_data      data[94]; // most of the ascii coverage. From '!'(33) to '~'(126)
+    f32             funit_to_em; // usually 2048
+    glyph_data      data[94];    // most of the ascii coverage. From '!'(33) to '~'(126)
     db_array_curves curves;
 } glyphs;
 
-void text_load_font(db_arena *arena, const char *file_path);
+glyphs *text_load_font(db_arena *arena, const char *file_path);
