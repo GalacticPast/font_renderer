@@ -14,6 +14,7 @@ typedef struct
     s32      curves_start_index;
     s32      curves_end_index;
     db_aabb2 aabb;
+    f32      advance; // em
 } glyph_data;
 
 typedef struct

@@ -39,6 +39,11 @@ glyphs *text_load_font(db_arena *arena, const char *file_path)
 
         glyph_data *g_data = &glyphs.data[i];
 
+        s32 advance_funits    = 0;
+        s32 left_side_bearing = 0;
+        stbtt_GetGlyphHMetrics(&font_info, glyph_index, &advance_funits, &left_side_bearing);
+        g_data->advance = advance_funits * glyphs.funit_to_em;
+
         g_data->curves_start_index = glyphs.curves.length;
         db_vector4 curr_point      = db_vector4_zero();
 

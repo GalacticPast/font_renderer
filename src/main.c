@@ -25,11 +25,9 @@ db_array_decl(vector2, db_vector2);
 db_array_decl(s32, s32);
 db_array_decl(f32, f32);
 
-void camera_set_matrix(camera *camera, shader *shader, db_vector3 glyph_scale, f32 near_plane, f32 far_plane);
+void camera_set_matrix(camera *camera, shader *shader, db_vector3 glyph_center, db_vector3 glyph_scale, f32 near_plane,
+                       f32 far_plane);
 b8   update(db_arena *main_arena);
-
-static inline db_matrix4 mat4_perspective(f32 fov_radians, f32 aspect_ratio, f32 near_clip, f32 far_clip);
-static inline db_matrix4 mat4_look_at(db_vector3 position, db_vector3 target, db_vector3 up);
 
 b8 opengl_startup(db_arena *main_arena)
 {
@@ -103,9 +101,15 @@ int main()
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    b8  run = true;
-    s32 i   = 0;
-    s32 mod = '~' - '!';
+    b8  run     = true;
+    s32 i       = 0;
+    s32 mod     = '~' - '!';
+    f32 font_px = 40.0f;
+
+    const char *string = "ABCDEFGHIJ";
+
+    f32 pen_pos[2] = {-0.643f, -0.343f};
+
     while (run)
     {
         input_update(0);
@@ -124,19 +128,34 @@ int main()
 
         shader_use(&shader);
 
-        db_vector2 half_extent = glyphs->data[i].aabb.half_size;
-        db_vector3 glyph_scale = db_vector3_make(half_extent.x * 2.0, half_extent.y * 2.0f, 1.0f);
+        glUniform1f(glGetUniformLocation(shader.program, "font_px"), font_px);
 
-        camera_set_matrix(&camera, &shader, glyph_scale, 0.1f, 100.0f);
+        // pen cursor for this frame, in em. Advances by each glyph's advance width
+        db_vector2 pen = db_vector2_make(pen_pos[0], pen_pos[1]);
 
-        // uniform vec2 curve_indicies;
-        u32        curve_loc = glGetUniformLocation(shader.program, "curve_indicies");
-        db_vector2 indicies  = db_vector2_make(glyphs->data[i].curves_start_index, glyphs->data[i].curves_end_index);
-        glUniform2fv(curve_loc, 1, indicies.data);
+        for (s32 j = 0; j < 11; j++)
+        {
+            s32        c            = string[j] - '!';
+            db_vector2 half_extent  = glyphs->data[c].aabb.half_size;
+            db_vector2 center       = glyphs->data[c].aabb.center;
+            db_vector3 glyph_scale  = db_vector3_make(half_extent.x * 2.0f, half_extent.y * 2.0f, 1.0f);
+            db_vector3 glyph_center = db_vector3_make(center.x, center.y, 0.0f);
 
-        vao_bind(&b_vao);
+            camera_set_matrix(&camera, &shader, glyph_center, glyph_scale, 0.1f, 100.0f);
 
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+            glUniform2f(glGetUniformLocation(shader.program, "pen_offset"), pen.x, pen.y);
+
+            // uniform vec2 curve_indicies;
+            u32        curve_loc = glGetUniformLocation(shader.program, "curve_indicies");
+            db_vector2 indicies = db_vector2_make(glyphs->data[c].curves_start_index, glyphs->data[c].curves_end_index);
+            glUniform2fv(curve_loc, 1, indicies.data);
+
+            vao_bind(&b_vao);
+
+            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+
+            pen.x += glyphs->data[c].advance;
+        }
 
         platform_swap_buffers();
     }
@@ -144,51 +163,8 @@ int main()
     platform_shutdown();
 }
 
-static inline db_matrix4 mat4_perspective(f32 fov_radians, f32 aspect_ratio, f32 near_clip, f32 far_clip)
-{
-    f32        half_tan_fov = tanf(fov_radians * 0.5f);
-    db_matrix4 out_matrix   = {0};
-    out_matrix.data[0]      = 1.0f / (aspect_ratio * half_tan_fov);
-    out_matrix.data[5]      = 1.0f / half_tan_fov;
-    out_matrix.data[10]     = -((far_clip + near_clip) / (far_clip - near_clip));
-    out_matrix.data[11]     = -1.0f;
-    out_matrix.data[14]     = -((2.0f * far_clip * near_clip) / (far_clip - near_clip));
-    return out_matrix;
-}
-
-static inline db_matrix4 mat4_look_at(db_vector3 position, db_vector3 target, db_vector3 up)
-{
-    db_matrix4 out_matrix;
-    db_vector3 z_axis;
-    z_axis.x = target.x - position.x;
-    z_axis.y = target.y - position.y;
-    z_axis.z = target.z - position.z;
-
-    z_axis            = db_vector3_normalize(z_axis);
-    db_vector3 x_axis = db_vector3_normalize(db_vector3_cross(z_axis, up));
-    db_vector3 y_axis = db_vector3_cross(x_axis, z_axis);
-
-    out_matrix.data[0]  = x_axis.x;
-    out_matrix.data[1]  = y_axis.x;
-    out_matrix.data[2]  = -z_axis.x;
-    out_matrix.data[3]  = 0;
-    out_matrix.data[4]  = x_axis.y;
-    out_matrix.data[5]  = y_axis.y;
-    out_matrix.data[6]  = -z_axis.y;
-    out_matrix.data[7]  = 0;
-    out_matrix.data[8]  = x_axis.z;
-    out_matrix.data[9]  = y_axis.z;
-    out_matrix.data[10] = -z_axis.z;
-    out_matrix.data[11] = 0;
-    out_matrix.data[12] = -db_vector3_dot_multiplication(x_axis, position);
-    out_matrix.data[13] = -db_vector3_dot_multiplication(y_axis, position);
-    out_matrix.data[14] = db_vector3_dot_multiplication(z_axis, position);
-    out_matrix.data[15] = 1.0f;
-
-    return out_matrix;
-}
-
-void camera_set_matrix(camera *camera, shader *shader, db_vector3 glyph_scale, f32 near_plane, f32 far_plane)
+void camera_set_matrix(camera *camera, shader *shader, db_vector3 glyph_center, db_vector3 glyph_scale, f32 near_plane,
+                       f32 far_plane)
 {
     u32 projection_loc = glGetUniformLocation(shader->program, "projection");
     u32 model_loc      = glGetUniformLocation(shader->program, "model");
@@ -201,9 +177,14 @@ void camera_set_matrix(camera *camera, shader *shader, db_vector3 glyph_scale, f
     db_matrix4 view;
     db_matrix4_identity(&view);
 
+    // model = translate(center) * scale(size): scale the unit quad first, then move it onto the ink box
+    db_matrix4 scale_matrix;
+    db_matrix4_scale(&scale_matrix, glyph_scale);
+    db_matrix4 translate_matrix;
+    db_matrix4_translate(&translate_matrix, glyph_center);
+
     db_matrix4 model;
-    db_matrix4_identity(&model);
-    db_matrix4_scale(&model, glyph_scale);
+    db_matrix4_mul(&model, &translate_matrix, &scale_matrix);
 
     glUniformMatrix4fv(view_loc, 1, GL_FALSE, view.data);
     glUniformMatrix4fv(projection_loc, 1, GL_FALSE, ortho.data);
