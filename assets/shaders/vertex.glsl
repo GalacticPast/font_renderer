@@ -31,6 +31,8 @@ void main()
 {
     // glyph space, in em: same units as the curves. Must not include pen_offset
     vec4 glyph_pos = (model * translation_matrix) * vec4(position, 1.0);
+    // dilate the quad by half a pixel so edge pixels are shaded (the paper's bounding-box expansion)
+    glyph_pos.xy += sign(position.xy) * (0.5 / font_px);
     frag_pos = glyph_pos.xy;
     frag_curve_indicies = curve_indicies; 
     // em -> pixels, for placing the vertex on screen only. The screen is top-left origin (y down) but font
