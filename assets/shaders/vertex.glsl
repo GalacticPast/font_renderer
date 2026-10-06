@@ -11,24 +11,28 @@ layout(std430, binding = 1) buffer curve_buffer{
     Curve curves[];
 };
 
-layout (location = 0) in vec3 position;
-
 uniform mat4 projection;
 uniform mat4 view;
 uniform mat4 model;
 
-uniform vec2 curve_indicies;
+layout (location = 0) in vec3 position;
+
+layout (location = 1) in vec2 pen_offset;
+layout (location = 2) in vec2 curve_indicies;
+layout (location = 3) in mat4 translation_matrix;
+
+flat out vec2 frag_curve_indicies;
+
 uniform float font_px; // pixels per em
-uniform vec2  pen_offset; // em, where this glyph's origin sits on the line
 
 out vec2 frag_pos;
 
 void main()
 {
     // glyph space, in em: same units as the curves. Must not include pen_offset
-    vec4 glyph_pos = model * vec4(position, 1.0);
+    vec4 glyph_pos = (model * translation_matrix) * vec4(position, 1.0);
     frag_pos = glyph_pos.xy;
-
+    frag_curve_indicies = curve_indicies; 
     // em -> pixels, for placing the vertex on screen only. The screen is top-left origin (y down) but font
     // outlines are y up, so the glyph's y is flipped here, not in the projection, to keep the UI convention
     vec2 pixel_xy = vec2(glyph_pos.x + pen_offset.x, pen_offset.y - glyph_pos.y) * font_px;

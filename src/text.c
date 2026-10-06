@@ -15,6 +15,44 @@ typedef struct
 
 text_state *state;
 
+//@warn: temp
+// for now font size is going to be 12
+void text_prepare_render_buffer(db_string *string, db_array_vector4 *buffer, f32 font_size)
+{
+    // for now the width of the window is 600
+    db_vector2 pen_pos = db_vector2_make(0.0, 12.0f);
+
+    for (s32 i = 0; i < string->length; i++)
+    {
+        char        c = string->data[i];
+        glyph_data *g = &state->glyphs.data[c - ' '];
+
+        // pen goes to em here, so only the pen is scaled. The matrix is already in em
+        db_vector4 v      = db_vector4_make(pen_pos.x / font_size, pen_pos.y / font_size, g->curves_indicies.x,
+                                            g->curves_indicies.y);
+        db_vector4 fr_row = db_vector4_make(g->translation_matrix.data[0], g->translation_matrix.data[1],
+                                            g->translation_matrix.data[2], g->translation_matrix.data[3]);
+        db_vector4 s_row  = db_vector4_make(g->translation_matrix.data[4], g->translation_matrix.data[5],
+                                            g->translation_matrix.data[6], g->translation_matrix.data[7]);
+        db_vector4 t_row  = db_vector4_make(g->translation_matrix.data[8], g->translation_matrix.data[9],
+                                            g->translation_matrix.data[10], g->translation_matrix.data[11]);
+        db_vector4 fo_row = db_vector4_make(g->translation_matrix.data[12], g->translation_matrix.data[13],
+                                            g->translation_matrix.data[14], g->translation_matrix.data[15]);
+        db_array_vector4_append(buffer, v);
+        db_array_vector4_append(buffer, fr_row);
+        db_array_vector4_append(buffer, s_row);
+        db_array_vector4_append(buffer, t_row);
+        db_array_vector4_append(buffer, fo_row);
+
+        pen_pos.x += g->advance * font_size;
+        if (pen_pos.x >= 600)
+        {
+            pen_pos.x  = 0.0f;
+            pen_pos.y += font_size + 3; // this is so random
+        }
+    }
+}
+
 glyphs *text_load_font(db_arena *arena, const char *file_path)
 {
     db_file_contents font_content = db_file_read_contents(arena, db_file_mode_rb, 0, file_path);
@@ -30,9 +68,9 @@ glyphs *text_load_font(db_arena *arena, const char *file_path)
     glyphs.curves      = db_array_curves_init(arena);
     glyphs.funit_to_em = stbtt_ScaleForMappingEmToPixels(&font_info, 1.0);
 
-    for (s32 i = 0; i <= ('~' - '!'); i++)
+    for (s32 i = 0; i <= ('~' - ' '); i++)
     {
-        s32 glyph_index = stbtt_FindGlyphIndex(&font_info, (s32)('!' + i));
+        s32 glyph_index = stbtt_FindGlyphIndex(&font_info, (s32)(' ' + i));
 
         stbtt_vertex *vertices      = NULL;
         b32           vertices_size = stbtt_GetGlyphShape(&font_info, glyph_index, &vertices);
@@ -44,8 +82,8 @@ glyphs *text_load_font(db_arena *arena, const char *file_path)
         stbtt_GetGlyphHMetrics(&font_info, glyph_index, &advance_funits, &left_side_bearing);
         g_data->advance = advance_funits * glyphs.funit_to_em;
 
-        g_data->curves_start_index = glyphs.curves.length;
-        db_vector4 curr_point      = db_vector4_zero();
+        g_data->curves_indicies.x = glyphs.curves.length;
+        db_vector4 curr_point     = db_vector4_zero();
 
         for (int i = 0; i < vertices_size; i++)
         {
@@ -78,7 +116,7 @@ glyphs *text_load_font(db_arena *arena, const char *file_path)
                 break;
             }
         }
-        g_data->curves_end_index = glyphs.curves.length;
+        g_data->curves_indicies.y = glyphs.curves.length;
 
         stbtt_FreeShape(&font_info, vertices);
     }
@@ -118,13 +156,22 @@ void text_compute_glyph_bbox(glyphs *g)
 
     s32 len = g->curves.length;
 
-    for (s32 i = 0; i < 94; i++)
+    for (s32 i = 0; i < 95; i++)
     {
         db_vector2 min = db_vector2_make(DB_MATH_F32_MAX, DB_MATH_F32_MAX);
         db_vector2 max = db_vector2_make(DB_MATH_F32_MIN, DB_MATH_F32_MIN);
 
-        s32 start = g->data[i].curves_start_index;
-        s32 end   = g->data[i].curves_end_index;
+        s32 start = g->data[i].curves_indicies.x;
+        s32 end   = g->data[i].curves_indicies.y;
+
+        if (start == end)
+        {
+            // no outline (e.g. space): nothing to draw, so keep the box at zero instead of MAX/MIN
+            g->data[i].aabb.center    = db_vector2_make(0.0f, 0.0f);
+            g->data[i].aabb.half_size = db_vector2_make(0.0f, 0.0f);
+            db_matrix4_identity(&g->data[i].translation_matrix);
+            continue;
+        }
 
         for (s32 j = start; j < end; j++)
         {
@@ -168,5 +215,17 @@ void text_compute_glyph_bbox(glyphs *g)
         db_vector2 half_size      = db_vector2_multiply(db_vector2_subtract(max, min), 0.5f);
         g->data[i].aabb.center    = center;
         g->data[i].aabb.half_size = half_size;
+        db_matrix4_identity(&g->data[i].translation_matrix);
+
+        db_vector3 glyph_scale  = db_vector3_make(half_size.x * 2.0f, half_size.y * 2.0f, 1.0f);
+        db_vector3 glyph_center = db_vector3_make(center.x, center.y, 0.0f);
+
+        db_matrix4 scale_matrix;
+        db_matrix4_scale(&scale_matrix, glyph_scale);
+
+        db_matrix4 translate_matrix;
+        db_matrix4_translate(&translate_matrix, glyph_center);
+
+        db_matrix4_mul(&g->data[i].translation_matrix, &translate_matrix, &scale_matrix);
     }
 }

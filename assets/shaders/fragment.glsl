@@ -12,11 +12,13 @@ layout(std430, binding = 1) buffer curve_buffer
     Curve curves[];
 };
 
+
 out vec4 FragColor;
 
 in vec2 frag_pos;
 
-uniform vec2  curve_indicies;
+flat in vec2 frag_curve_indicies;
+
 uniform float font_px;
 
 #define EPSILON       1.52587890625e-5
@@ -275,8 +277,8 @@ void main()
     float vertical_coverage_sum   = 0.0;
 
 
-    for (int i = int(curve_indicies.x);
-         i < int(curve_indicies.y);
+    for (int i = int(frag_curve_indicies.x);
+         i < int(frag_curve_indicies.y);
          ++i)
     {
         Curve curve = curves[i];
