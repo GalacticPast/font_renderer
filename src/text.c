@@ -15,8 +15,6 @@ typedef struct
 
 text_state *state;
 
-//@warn: temp
-// for now font size is going to be 12
 void text_prepare_render_buffer(db_string *string, db_array_vector4 *buffer, f32 font_size, f32 wrap_width)
 {
     // the first baseline sits one em below the top edge, so the first line is not clipped
@@ -28,8 +26,8 @@ void text_prepare_render_buffer(db_string *string, db_array_vector4 *buffer, f32
         glyph_data *g = &state->glyphs.data[c - ' '];
 
         // pen goes to em here, so only the pen is scaled. The matrix is already in em
-        db_vector4 v      = db_vector4_make(pen_pos.x / font_size, pen_pos.y / font_size, g->curves_indicies.x,
-                                            g->curves_indicies.y);
+        db_vector4 v =
+            db_vector4_make(pen_pos.x / font_size, pen_pos.y / font_size, g->curves_indicies.x, g->curves_indicies.y);
         db_vector4 fr_row = db_vector4_make(g->translation_matrix.data[0], g->translation_matrix.data[1],
                                             g->translation_matrix.data[2], g->translation_matrix.data[3]);
         db_vector4 s_row  = db_vector4_make(g->translation_matrix.data[4], g->translation_matrix.data[5],
@@ -64,9 +62,11 @@ glyphs *text_load_font(db_arena *arena, const char *file_path)
 
     state = db_arena_alloc(arena, sizeof(text_state));
 
-    glyphs glyphs      = {};
-    glyphs.curves      = db_array_curves_init(arena);
-    glyphs.funit_to_em = stbtt_ScaleForMappingEmToPixels(&font_info, 1.0);
+    glyphs glyphs           = {};
+    glyphs.curves           = db_array_curves_init(arena);
+    glyphs.horizontal_bands = db_array_s32_init(arena);
+    glyphs.vertical_bands   = db_array_s32_init(arena);
+    glyphs.funit_to_em      = stbtt_ScaleForMappingEmToPixels(&font_info, 1.0);
 
     for (s32 i = 0; i <= ('~' - ' '); i++)
     {
@@ -151,11 +151,17 @@ static f32 solve_bezier(f32 a, f32 b, f32 c, f32 t)
     return ans;
 }
 
+b8 compare_s32(s32 *a, s32 *b)
+{
+    return (*a > *b) - (*a < *b); // -1, 0, or 1
+}
+
 void text_compute_glyph_bbox(glyphs *g)
 {
 
     s32 len = g->curves.length;
 
+    db_arena temp = db_arena_init();
     for (s32 i = 0; i < 95; i++)
     {
         db_vector2 min = db_vector2_make(DB_MATH_F32_MAX, DB_MATH_F32_MAX);
@@ -166,7 +172,6 @@ void text_compute_glyph_bbox(glyphs *g)
 
         if (start == end)
         {
-            // no outline (e.g. space): nothing to draw, so keep the box at zero instead of MAX/MIN
             g->data[i].aabb.center    = db_vector2_make(0.0f, 0.0f);
             g->data[i].aabb.half_size = db_vector2_make(0.0f, 0.0f);
             db_matrix4_identity(&g->data[i].translation_matrix);
@@ -211,6 +216,7 @@ void text_compute_glyph_bbox(glyphs *g)
                 }
             }
         }
+
         db_vector2 center         = db_vector2_multiply(db_vector2_add(min, max), 0.5f);
         db_vector2 half_size      = db_vector2_multiply(db_vector2_subtract(max, min), 0.5f);
         g->data[i].aabb.center    = center;
@@ -227,5 +233,76 @@ void text_compute_glyph_bbox(glyphs *g)
         db_matrix4_translate(&translate_matrix, glyph_center);
 
         db_matrix4_mul(&g->data[i].translation_matrix, &translate_matrix, &scale_matrix);
+
+        s32 band_count    = 8;
+        f32 eps           = 1.0f / 1024.0f;
+        // horizontal banding
+        f32 h_band_height = (max.y - min.y) / ((f32)band_count);
+
+        db_array_s32 indices = db_array_s32_init(&temp);
+        for (s32 i = 0; i < band_count; ++i)
+        {
+            f32 band_min_y = min.y + (f32)i * h_band_height - eps;
+            f32 band_max_y = min.y + (f32)(i + 1) * h_band_height + eps;
+            for (int j = start; j < end; j++)
+            {
+                curve *c = &g->curves.data[j];
+                // check if it is horizontal
+                if (fabs(c->p0.y - c->p2.y) < 1e-5 && fabs(c->p1.y - (c->p0.y + c->p2.y) * 0.5) < 1e-5)
+                {
+                    continue;
+                }
+                // check if the curve overlaps the band
+                if (db_min3(c->p0.y, c->p1.y, c->p2.y) <= band_max_y &&
+                    db_max3(c->p0.y, c->p1.y, c->p2.y) >= band_min_y)
+                {
+                    db_array_s32_append(&indices, j - start);
+                }
+            }
+        }
+
+        s32 *itr                               = NULL;
+        s32  ind                               = 0;
+        g->data[i].horizontal_bands_indicies.x = g->horizontal_bands.length;
+        db_array_for_each_ptr(indices, ind, itr)
+        {
+            db_array_s32_append(&g->horizontal_bands, *itr);
+        }
+        g->data[i].horizontal_bands_indicies.y = g->horizontal_bands.length;
+        db_array_s32_clear(&indices);
+
+        f32 v_band_height = (max.x - min.x) / ((f32)band_count);
+        for (s32 i = 0; i < band_count; ++i)
+        {
+            f32 band_min_x = min.x + (f32)i * v_band_height - eps;
+            f32 band_max_x = min.x + (f32)(i + 1) * v_band_height + eps;
+            for (int j = start; j < end; j++)
+            {
+                curve *c = &g->curves.data[j];
+                // check if it vertical
+                if (fabs(c->p0.x - c->p2.x) < 1e-5 && fabs(c->p1.x - (c->p0.x + c->p2.x) * 0.5) < 1e-5)
+                {
+                    continue;
+                }
+                // check if the curve overlaps the band
+                if (db_min3(c->p0.x, c->p1.x, c->p2.x) <= band_max_x &&
+                    db_max3(c->p0.x, c->p1.x, c->p2.x) >= band_min_x)
+                {
+                    db_array_s32_append(&indices, j - start);
+                }
+            }
+        }
+
+        itr                                  = NULL;
+        ind                                  = 0;
+        g->data[i].vertical_bands_indicies.x = g->vertical_bands.length;
+        db_array_for_each_ptr(indices, ind, itr)
+        {
+            db_array_s32_append(&g->vertical_bands, *itr);
+        }
+        g->data[i].vertical_bands_indicies.y = g->vertical_bands.length;
+        db_arena_reset(&temp);
     }
+    db_arena_free(&temp);
 }
+// return fabs(p0.x - p2.x) < 1e-5 && fabs(p1.x - (p0.x + p2.x) * 0.5) < 1e-5;

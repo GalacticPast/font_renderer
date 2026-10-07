@@ -13,6 +13,8 @@ typedef struct
 {
     db_matrix4 translation_matrix;
     db_vector2 curves_indicies;
+    db_vector2 horizontal_bands_indicies;
+    db_vector2 vertical_bands_indicies;
     db_aabb2   aabb;
     f32        advance; // em
 } glyph_data;
@@ -23,6 +25,8 @@ typedef struct
     f32             funit_to_em; // usually 2048
     glyph_data      data[95];    // most of the ascii coverage. From ' '(32) to '~'(126)
     db_array_curves curves;
+    db_array_s32    horizontal_bands;
+    db_array_s32    vertical_bands;
 } glyphs;
 
 // vec4s written per glyph by text_prepare_render_buffer: pen + curve range, then the 4 matrix columns

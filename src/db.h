@@ -36,6 +36,18 @@
 
 #endif
 
+#if !defined(db_inline)
+#if defined(_MSC_VER)
+#if _MSC_VER < 1300
+#define db_inline
+#else
+#define db_inline __forceinline
+#endif
+#else
+#define db_inline __attribute__((__always_inline__))
+#endif
+#endif
+
 /*
    ▗▖  ▗▖▗▖  ▗▖    ▗▄▄▄▖▗▖  ▗▖▗▄▄▖ ▗▄▄▄▖ ▗▄▄▖
    ▐▛▚▞▜▌ ▝▚▞▘       █   ▝▚▞▘ ▐▌ ▐▌▐▌   ▐▌
@@ -261,6 +273,33 @@ typedef size_t s_size;
 #define bit62 (1ull << 61)
 #define bit63 (1ull << 62)
 #define bit64 (1ull << 63)
+
+#ifndef cast
+#define cast(Type) (Type)
+#endif
+
+// NOTE(bill): Because a signed sizeof is more useful
+#ifndef db_size_of
+#define db_size_of(x) (s_size)(sizeof(x))
+#endif
+
+// i have no idea how they work lmaooo
+#ifndef db_count_of
+#define db_count_of(x) ((db_size_of(x) / db_size_of(0 [x])) / ((s_size)(!(db_size_of(x) % db_size_of(0 [x])))))
+#endif
+
+#ifndef db_offset_of
+#define db_offset_of(Type, element) ((s_size) & (((Type *)0)->element))
+#endif
+// till here
+
+#define db_swap(Type, a, b)                                                                                            \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        Type tmp = (a);                                                                                                \
+        (a)      = (b);                                                                                                \
+        (b)      = tmp;                                                                                                \
+    } while (0)
 
 // thanks google https://github.com/google/sanitizers/wiki/addresssanitizermanualpoisoning
 // user code should use macros instead of functions.
@@ -495,6 +534,12 @@ typedef struct db_array_skeleton
         }                                                                                                              \
         return NULL;                                                                                                   \
     }                                                                                                                  \
+    static inline Type *db_array_##name##_sort(db_array_##name *a, b8 (*db_array_##name##_cmp)(Type * a, Type * b))    \
+    {                                                                                                                  \
+        ASSERT(a);                                                                                                     \
+        __db_array_sort((db_array_skeleton *)a, (void *)db_array_##name##_cmp);                                        \
+        return NULL;                                                                                                   \
+    }                                                                                                                  \
     static inline db_array_##name db_array_##name##_duplicate(db_array_##name *a)                                      \
     {                                                                                                                  \
         ASSERT(a);                                                                                                     \
@@ -532,6 +577,7 @@ typedef struct db_array_skeleton
 db_return_code __db_array_init(db_arena *shared_arena, db_array_skeleton *array, size_t type_size);
 void           __db_array_free(db_array_skeleton *array);
 db_return_code __db_array_resize(db_array_skeleton *array);
+void           __db_array_sort(db_array_skeleton *array, b8 (*cmp)(void const *a, void const *b));
 
 /*
   ▗▄▄▖▗▄▄▄▖▗▄▖  ▗▄▄▖▗▖ ▗▖
@@ -796,6 +842,72 @@ void             db_file_free_contents(db_file_contents *fc);
 
 #ifdef DB_IMPLEMENTATION
 #undef DB_IMPLEMENTATION
+
+db_inline void *db_pointer_add(void *ptr, s_size bytes)
+{
+    return cast(void *)(cast(u8 *) ptr + bytes);
+}
+db_inline void *db_pointer_sub(void *ptr, s_size bytes)
+{
+    return cast(void *)(cast(u8 *) ptr - bytes);
+}
+db_inline void const *db_pointer_add_const(void const *ptr, s_size bytes)
+{
+    return cast(void const *)(cast(u8 const *) ptr + bytes);
+}
+db_inline void const *db_pointer_sub_const(void const *ptr, s_size bytes)
+{
+    return cast(void const *)(cast(u8 const *) ptr - bytes);
+}
+db_inline s_size db_pointer_diff(void const *begin, void const *end)
+{
+    return cast(s_size)(cast(u8 const *) end - cast(u8 const *) begin);
+}
+
+void db_memswap(void *i, void *j, s_size size)
+{
+    if (i == j)
+        return;
+
+    if (size == 4)
+    {
+        db_swap(u32, *cast(u32 *) i, *cast(u32 *) j);
+    }
+    else if (size == 8)
+    {
+        db_swap(u64, *cast(u64 *) i, *cast(u64 *) j);
+    }
+    else if (size < 8)
+    {
+        u8 *a = cast(u8 *) i;
+        u8 *b = cast(u8 *) j;
+        if (a != b)
+        {
+            while (size--)
+            {
+                db_swap(u8, *a, *b);
+                a++, b++;
+            }
+        }
+    }
+    else
+    {
+        char buffer[256];
+
+        while (size > db_size_of(buffer))
+        {
+            db_memswap(i, j, db_size_of(buffer));
+            i     = db_pointer_add(i, db_size_of(buffer));
+            j     = db_pointer_add(j, db_size_of(buffer));
+            size -= db_size_of(buffer);
+        }
+
+        memcpy(buffer, i, size);
+        memcpy(i, j, size);
+        memcpy(j, buffer, size);
+    }
+}
+
 // verify later on though if i could have huge pages or not
 
 void *__db_reserve_virtual_memory(size_t reserve_memory_size)
@@ -1294,6 +1406,97 @@ void __db_array_free(db_array_skeleton *array)
     // print warning
     printf("WHY ARE YOU MANNUALLY FREEING UP MEMORY???????\n");
     ASSERT_WITH_MSG(false, "I DID THIS JUST TO PISS YOU OFFF");
+}
+// quick sort with
+#define DB__SORT_INSERT_SORT_THRESHOLD 8
+#define DB__SORT_PUSH(_base, _limit)                                                                                   \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        stack_ptr[0]  = (_base);                                                                                       \
+        stack_ptr[1]  = (_limit);                                                                                      \
+        stack_ptr    += 2;                                                                                             \
+    } while (0)
+
+#define DB__SORT_POP(_base, _limit)                                                                                    \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        stack_ptr -= 2;                                                                                                \
+        (_base)    = stack_ptr[0];                                                                                     \
+        (_limit)   = stack_ptr[1];                                                                                     \
+    } while (0)
+
+void __db_array_sort(db_array_skeleton *array, b8 (*cmp)(void const *a, void const *b))
+{
+    u8    *i, *j;
+    u8    *base      = (u8 *)array->data;
+    u8    *limit     = base + array->length * array->type_size;
+    s_size threshold = DB__SORT_INSERT_SORT_THRESHOLD * array->type_size;
+
+    s_size size = array->type_size;
+
+    // NOTE(bill): Prepare the stack
+    u8  *stack[64] = {0};
+    u8 **stack_ptr = stack;
+
+    for (;;)
+    {
+        if ((s_size)(limit - base) > threshold)
+        {
+            i = base + size;
+            j = limit - size;
+
+            db_memswap(((limit - base) / size / 2) * size + base, base, size);
+            if (cmp(i, j) > 0)
+                db_memswap(i, j, size);
+            if (cmp(base, j) > 0)
+                db_memswap(base, j, size);
+            if (cmp(i, base) > 0)
+                db_memswap(i, base, size);
+
+            for (;;)
+            {
+                do
+                    i += size;
+                while (cmp(i, base) < 0);
+                do
+                    j -= size;
+                while (cmp(j, base) > 0);
+                if (i > j)
+                    break;
+                db_memswap(i, j, size);
+            }
+
+            db_memswap(base, j, size);
+
+            if (j - base > limit - i)
+            {
+                DB__SORT_PUSH(base, j);
+                base = i;
+            }
+            else
+            {
+                DB__SORT_PUSH(i, limit);
+                limit = j;
+            }
+        }
+        else
+        {
+            // NOTE(bill): Insertion sort
+            for (j = base, i = j + size; i < limit; j = i, i += size)
+            {
+                for (; cmp(j, j + size) > 0; j -= size)
+                {
+                    db_memswap(j, j + size, size);
+                    if (j == base)
+                        break;
+                }
+            }
+
+            if (stack_ptr == stack)
+                break; // NOTE(bill): Sorting is done!
+            DB__SORT_POP(base, limit);
+        }
+    }
 }
 
 db_return_code __db_stack_init(db_arena *shared_arena, db_stack_skeleton *array, size_t type_size)
