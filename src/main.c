@@ -84,7 +84,7 @@ int main()
     glyphs *glyphs = text_load_font(&main_arena, "../assets/font/Archivo-Regular.ttf");
 
     //@info:   temp
-    f32       font_size = 8.0f * display_scale; // 12 logical px, in physical pixels
+    f32       font_size = 24.0f * display_scale; // 12 logical px, in physical pixels
     db_string str       = db_string_make(
         &main_arena, "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut "
                      "labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco "
@@ -145,10 +145,13 @@ int main()
         if (!platform_pump_messages())
             break;
         run = update(&main_arena);
-        if (input_is_key_down(KEY_D) && !input_was_key_down(KEY_D))
+        if (input_is_key_down(KEY_D))
         {
-            i++;
-            i %= mod;
+            font_size += 2.0f;
+        }
+        if (input_is_key_down(KEY_A))
+        {
+            font_size -= 2.0f;
         }
 
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
