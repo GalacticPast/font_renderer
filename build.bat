@@ -11,6 +11,7 @@ set EXTENSION=.exe
 set INCLUDES=-Ivendor/glad -Ivendor
 rem If raylib, uncomment the following line:
 rem set LINKER_FLAGS=-L./external/raylib/lib/windows/ -lraylib -lkernel32 -lgdi32 -luser32 -ladvapi32 -ltdh -lwinmm -lm
+set DEFINES=-DDB_PLATFORM_WINDOWS
 set LINKER_FLAGS=-lopengl32 -lgdi32 -luser32
 
 rem Trap sanitizer failures without linking the incompatible Windows UBSan runtime.
@@ -23,8 +24,14 @@ if "%ASSEMBLY%"=="" (
     exit /b 1
 )
 
-rem Only compile the Windows backend; Linux/Wayland need different dependencies.
-set SRC_FILES=src/main.c src/gl.c src/input.c src/platform/win32.c vendor/glad/glad.c
+rem 
+set "SRC_FILES="
+
+for /r "%SRC%" %%F in (*.c) do (
+    set "SRC_FILES=!SRC_FILES! "%%F""
+)
+
+set "SRC_FILES=!SRC_FILES! "vendor\glad\glad.c""
 
 echo Building %ASSEMBLY%%EXTENSION%...
 %CC% !SRC_FILES! %COMPILER_FLAGS% -o "%BIN%\%ASSEMBLY%%EXTENSION%" %INCLUDES% %LINKER_FLAGS%

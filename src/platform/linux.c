@@ -1,13 +1,13 @@
 #include "../input.h"
 #include "platform.h"
 
+// Linux platform layer.
+#ifdef DPLATFORM_LINUX
+
 #include "../../vendor/glad/glad.h"
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 //
-// Linux platform layer.
-#ifdef DPLATFORM_LINUX
-
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>

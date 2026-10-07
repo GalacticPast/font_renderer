@@ -107,7 +107,7 @@ b8 shader_create(db_arena *arena, shader *shader, const char *vertex_path, const
     printf("Compiling vertex shader\n");
     u32 vertex_shader = glCreateShader(GL_VERTEX_SHADER);
 
-    const char *const vert_src = vertex_shader_source.data;
+    const char *const vert_src = vertex_shader_source.data; // this is riskyy
     glShaderSource(vertex_shader, 1, &vert_src, NULL);
     glCompileShader(vertex_shader);
 

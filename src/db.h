@@ -679,7 +679,7 @@ typedef struct db_string
     s64       capacity;
     s64       length;
     db_arena *arena;
-    char     *data; // this is actually a linked list
+    char     *data; // this could be a linked list
 } db_string;
 
 // this is for the initial capacity for strings whose arenas are TYPE_ARENA_LINEAR
@@ -727,13 +727,14 @@ u64 db_murmur64A_seed(void const *const key, u64 len, u64 seed);
 typedef u32 db_file_mode;
 typedef enum db_file_mode_flag
 {
-    db_file_mode_read   = bit0,
-    db_file_mode_write  = bit1,
-    db_file_mode_append = bit2,
-    db_file_mode_rw     = bit3,
-    db_file_mode_rb     = bit4,
+    db_file_mode_read   = bit1,
+    db_file_mode_write  = bit2,
+    db_file_mode_append = bit3,
+    db_file_mode_rw     = bit4,
+    db_file_mode_rb     = bit5,
 
-    db_file_mode_modes = db_file_mode_read | db_file_mode_write | db_file_mode_append | db_file_mode_rw,
+    db_file_mode_modes = db_file_mode_read | db_file_mode_write | db_file_mode_append | db_file_mode_rw |
+        db_file_mode_rb,
 } db_file_mode_flag;
 
 typedef enum db_file_error
@@ -1974,6 +1975,7 @@ b8 db_strings_are_equal(db_string const *lhs, db_string const *rhs)
 
 FILE *db_file_open(char const *file_path, db_file_mode mode)
 {
+
     char const *f_os_mode = NULL;
 
     switch (mode & db_file_mode_modes)
@@ -1996,6 +1998,9 @@ FILE *db_file_open(char const *file_path, db_file_mode mode)
         case db_file_mode_append | db_file_mode_rw:
             f_os_mode = "a+";
             break;
+        case db_file_mode_rb:
+            f_os_mode = "rb";
+            break;
         default:
             printf("Invalid file mode\n");
             return NULL;
@@ -2004,6 +2009,10 @@ FILE *db_file_open(char const *file_path, db_file_mode mode)
 #if defined(DB_PLATFORM_LINUX)
     FILE *f = fopen(file_path, f_os_mode);
 #elif defined(DB_PLATFORM_WINDOWS)
+    if (mode & db_file_mode_read)
+    {
+        f_os_mode = "rb";
+    }
     FILE   *f   = NULL;
     errno_t err = fopen_s(&f, file_path, f_os_mode);
 #endif
