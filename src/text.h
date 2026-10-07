@@ -29,4 +29,4 @@ typedef struct
 #define TEXT_VEC4S_PER_GLYPH 5
 
 glyphs *text_load_font(db_arena *arena, const char *file_path);
-void    text_prepare_render_buffer(db_string *string, db_array_vector4 *buffer, f32 font_size);
+void    text_prepare_render_buffer(db_string *string, db_array_vector4 *buffer, f32 font_size, f32 wrap_width);

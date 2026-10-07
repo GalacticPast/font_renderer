@@ -593,6 +593,8 @@ keys translate_keycode(u32 xk_keycode)
         ASSERT(expr != 0);                                                                                             \
     }
 //
+#include "../platform/wayland/fractional-scale-v1-client-protocol.h"
+#include "../platform/wayland/viewporter-client-protocol.h"
 #include "../platform/wayland/xdg-decoration-unstable-v1.h"
 #include "../platform/wayland/xdg-shell-client-protocol.h"
 
@@ -610,17 +612,21 @@ keys translate_keycode(u32 xk_keycode)
 typedef struct platform_state
 {
     /* Globals */
-    struct wl_display    *wl_display;
-    struct wl_registry   *wl_registry;
-    struct wl_shm        *wl_shm;
-    struct wl_seat       *wl_seat;
-    struct wl_compositor *wl_compositor;
-    struct xdg_wm_base   *xdg_wm_base;
+    struct wl_display                     *wl_display;
+    struct wl_registry                    *wl_registry;
+    struct wl_shm                         *wl_shm;
+    struct wl_seat                        *wl_seat;
+    struct wl_compositor                  *wl_compositor;
+    struct xdg_wm_base                    *xdg_wm_base;
+    struct wp_viewporter                  *wp_viewporter;
+    struct wp_fractional_scale_manager_v1 *wp_fractional_scale_manager;
 
     /* Objects */
-    struct wl_surface   *wl_surface;
-    struct xdg_surface  *xdg_surface;
-    struct xdg_toplevel *xdg_toplevel;
+    struct wl_surface             *wl_surface;
+    struct xdg_surface            *xdg_surface;
+    struct xdg_toplevel           *xdg_toplevel;
+    struct wp_viewport            *wp_viewport;
+    struct wp_fractional_scale_v1 *wp_fractional_scale;
 
     /* input */
     struct wl_keyboard *wl_keyboard;
@@ -639,9 +645,12 @@ typedef struct platform_state
     EGLSurface            egl_surface;
     struct wl_egl_window *egl_window;
 
-    /* dimensions */
+    /* dimensions, in logical units */
     u32 width;
     u32 height;
+
+    /* physical pixels per logical unit, from the compositor's preferred_scale event */
+    f32 display_scale;
 
 } platform_state;
 
@@ -893,6 +902,16 @@ static void registry_global(void *data, struct wl_registry *wl_registry, u32 nam
         platform_state_ptr->zxdg_decoration_manager_v1 = (struct zxdg_decoration_manager_v1 *)(wl_registry_bind(
             wl_registry, name, &zxdg_decoration_manager_v1_interface, version));
     }
+    else if (db_strcmp(interface, wp_viewporter_interface.name))
+    {
+        platform_state_ptr->wp_viewporter =
+            (struct wp_viewporter *)wl_registry_bind(wl_registry, name, &wp_viewporter_interface, version);
+    }
+    else if (db_strcmp(interface, wp_fractional_scale_manager_v1_interface.name))
+    {
+        platform_state_ptr->wp_fractional_scale_manager = (struct wp_fractional_scale_manager_v1 *)wl_registry_bind(
+            wl_registry, name, &wp_fractional_scale_manager_v1_interface, version);
+    }
 }
 
 static void registry_global_remove(void *data, struct wl_registry *wl_registry, u32 name)
@@ -905,6 +924,21 @@ static const struct wl_registry_listener wl_registry_listener = {
     .global_remove = registry_global_remove,
 };
 
+// The compositor tells us the scale as numerator / 120, so 1.6 arrives as 192.
+static void fractional_scale_preferred(void *data, struct wp_fractional_scale_v1 *fractional_scale, uint32_t scale_120)
+{
+    platform_state_ptr->display_scale = scale_120 / 120.0f;
+}
+
+static const struct wp_fractional_scale_v1_listener fractional_scale_listener = {
+    .preferred_scale = fractional_scale_preferred,
+};
+
+f32 platform_get_display_scale()
+{
+    return platform_state_ptr->display_scale;
+}
+
 b8 platform_startup(db_arena *arena, char *application_name, s32 x, s32 y, s32 width, s32 height)
 {
 
@@ -913,57 +947,78 @@ b8 platform_startup(db_arena *arena, char *application_name, s32 x, s32 y, s32 w
 
     printf("%s\n", "Initializing linux-Wayland platform...");
 
-    platform_state_ptr->wl_display = wl_display_connect(NULL);
-    if (!platform_state_ptr->wl_display)
-    {
-        return false;
-    }
-
-    platform_state_ptr->wl_registry = wl_display_get_registry(platform_state_ptr->wl_display);
-    if (!platform_state_ptr->wl_registry)
-    {
-        return false;
-    }
-
-    platform_state_ptr->xkb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
-    if (!platform_state_ptr->xkb_context)
-    {
-        return false;
-    }
-
-    wl_registry_add_listener(platform_state_ptr->wl_registry, &wl_registry_listener, platform_state_ptr);
-
-    wl_display_roundtrip(platform_state_ptr->wl_display);
-
-    platform_state_ptr->wl_surface = wl_compositor_create_surface(platform_state_ptr->wl_compositor);
-    if (!platform_state_ptr->wl_surface)
-    {
-        return false;
-    }
-
-    platform_state_ptr->xdg_surface =
-        xdg_wm_base_get_xdg_surface(platform_state_ptr->xdg_wm_base, platform_state_ptr->wl_surface);
-    if (!platform_state_ptr->xdg_surface)
-    {
-        return false;
-    }
-
-    xdg_surface_add_listener(platform_state_ptr->xdg_surface, &xdg_surface_listener, platform_state_ptr);
-
-    platform_state_ptr->xdg_toplevel = xdg_surface_get_toplevel(platform_state_ptr->xdg_surface);
-
-    if (!platform_state_ptr->xdg_toplevel)
-    {
-        return false;
-    }
-    xdg_toplevel_add_listener(platform_state_ptr->xdg_toplevel, &xdg_toplevel_listener, platform_state_ptr);
-
-    xdg_toplevel_set_title(platform_state_ptr->xdg_toplevel, application_name);
-    xdg_toplevel_set_app_id(platform_state_ptr->xdg_toplevel, application_name);
-
     platform_state *state = platform_state_ptr;
 
-    state->egl_display = eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_KHR, platform_state_ptr->wl_display, NULL);
+    state->wl_display = wl_display_connect(NULL);
+    if (!state->wl_display)
+    {
+        return false;
+    }
+
+    state->wl_registry = wl_display_get_registry(state->wl_display);
+    if (!state->wl_registry)
+    {
+        return false;
+    }
+
+    state->xkb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+    if (!state->xkb_context)
+    {
+        return false;
+    }
+
+    wl_registry_add_listener(state->wl_registry, &wl_registry_listener, state);
+
+    wl_display_roundtrip(state->wl_display);
+
+    state->wl_surface = wl_compositor_create_surface(state->wl_compositor);
+    if (!state->wl_surface)
+    {
+        return false;
+    }
+
+    state->xdg_surface = xdg_wm_base_get_xdg_surface(state->xdg_wm_base, state->wl_surface);
+    if (!state->xdg_surface)
+    {
+        return false;
+    }
+
+    xdg_surface_add_listener(state->xdg_surface, &xdg_surface_listener, state);
+
+    state->xdg_toplevel = xdg_surface_get_toplevel(state->xdg_surface);
+
+    if (!state->xdg_toplevel)
+    {
+        return false;
+    }
+    xdg_toplevel_add_listener(state->xdg_toplevel, &xdg_toplevel_listener, state);
+
+    xdg_toplevel_set_title(state->xdg_toplevel, application_name);
+    xdg_toplevel_set_app_id(state->xdg_toplevel, application_name);
+
+    // A window whose min and max size are equal is treated as fixed-size, so tiling compositors float it
+    // instead of resizing it. Otherwise the compositor stretches our buffer to the tile.
+    xdg_toplevel_set_min_size(state->xdg_toplevel, width, height);
+    xdg_toplevel_set_max_size(state->xdg_toplevel, width, height);
+
+    // Default to 1 if the compositor doesn't send a scale.
+    state->display_scale = 1.0f;
+
+    // The viewport lets a buffer of physical size show at the logical size, so the compositor doesn't stretch it.
+    if (state->wp_viewporter)
+    {
+        state->wp_viewport = wp_viewporter_get_viewport(state->wp_viewporter, state->wl_surface);
+        wp_viewport_set_destination(state->wp_viewport, width, height);
+    }
+
+    if (state->wp_fractional_scale_manager)
+    {
+        state->wp_fractional_scale =
+            wp_fractional_scale_manager_v1_get_fractional_scale(state->wp_fractional_scale_manager, state->wl_surface);
+        wp_fractional_scale_v1_add_listener(state->wp_fractional_scale, &fractional_scale_listener, state);
+    }
+
+    state->egl_display = eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_KHR, state->wl_display, NULL);
     if (state->egl_display == EGL_NO_DISPLAY)
     {
         printf("%s\n", "Failed to get EGL display");
@@ -1021,6 +1076,7 @@ b8 platform_startup(db_arena *arena, char *application_name, s32 x, s32 y, s32 w
         return false;
     }
 
+    // The scale is only known after the first frame, so the window starts at 1x and is resized below.
     state->egl_window = wl_egl_window_create(state->wl_surface, width, height);
 
     if (!state->egl_window)
@@ -1063,6 +1119,16 @@ b8 platform_startup(db_arena *arena, char *application_name, s32 x, s32 y, s32 w
         return false;
     }
 
+    // The compositor sends preferred_scale only after the surface has shown a frame, so show one frame and
+    // then read the events it sent back.
+    eglSwapBuffers(state->egl_display, state->egl_surface);
+    wl_display_roundtrip(state->wl_display);
+    if (state->display_scale != 1.0f)
+    {
+        wl_egl_window_resize(state->egl_window, (s32)(width * state->display_scale),
+                             (s32)(height * state->display_scale), 0, 0);
+    }
+
     if (!gladLoadGLLoader((GLADloadproc)eglGetProcAddress))
     {
         printf("Failed to initialize GLAD\n");
@@ -1071,13 +1137,13 @@ b8 platform_startup(db_arena *arena, char *application_name, s32 x, s32 y, s32 w
 
     printf("Opengl initialization sucessful.\n");
 
-    wl_surface_commit(platform_state_ptr->wl_surface);
+    wl_surface_commit(state->wl_surface);
 
-    // platform_state_ptr->zxdg_toplevel_decoration_v1 = zxdg_decoration_manager_v1_get_toplevel_decoration(
-    //     platform_state_ptr->zxdg_decoration_manager_v1,
-    //     platform_state_ptr->xdg_toplevel); // toplevel is from xdg_surface_get_toplevel
+    // state->zxdg_toplevel_decoration_v1 = zxdg_decoration_manager_v1_get_toplevel_decoration(
+    //     state->zxdg_decoration_manager_v1,
+    //     state->xdg_toplevel); // toplevel is from xdg_surface_get_toplevel
     //
-    // zxdg_toplevel_decoration_v1_set_mode(platform_state_ptr->zxdg_toplevel_decoration_v1,
+    // zxdg_toplevel_decoration_v1_set_mode(state->zxdg_toplevel_decoration_v1,
     //                                      ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
 
     return true;

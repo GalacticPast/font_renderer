@@ -2,6 +2,7 @@
 #include "../db.h"
 
 b8   platform_startup(db_arena *arena, char *application_name, s32 x, s32 y, s32 width, s32 height);
+f32  platform_get_display_scale(); // physical pixels per logical unit. 1 where the platform doesn't report one
 void platform_shutdown();
 b8   platform_pump_messages();
 

@@ -21,336 +21,142 @@ flat in vec2 frag_curve_indicies;
 
 uniform float font_px;
 
-#define EPSILON       1.52587890625e-5
-#define RAY_NUDGE_PX  0.0317
+// Paper Table 1: 16-bit lookup. For input code i, bit 2i is the t1 contribution and bit 2i+1 the t2 contribution.
+#define CONTRIBUTION_TABLE 0x2E74
+
+// Supersampling: samples per pixel along each axis (paper section 6). 1 disables it.
+#define SAMPLES_PER_AXIS 3
+
+// The paper's only tolerance: a near-zero quadratic term means the curve is a straight line.
+#define LINEAR_EPSILON 1e-6
 
 
-// ------------------------------------------------------------
-// Horizontal ray:
-// Find t where B_y(t) = ray_y
-// ------------------------------------------------------------
-
-vec2 horiz_ray_roots(Curve curve, float ray_y)
+// Evaluate B(t) along the ray's axis: (1-t)^2 p0 + 2t(1-t) p1 + t^2 p2
+float bezier_along_ray(float u0, float u1, float u2, float t)
 {
-    float a = curve.p0.y - 2.0 * curve.p1.y + curve.p2.y;
-    float b = 2.0 * (curve.p1.y - curve.p0.y);
-    float c = curve.p0.y - ray_y;
-
-    vec2 roots = vec2(-1.0);
-
-    // Linear case.
-    if (abs(a) < EPSILON)
-    {
-        if (abs(b) > EPSILON)
-        {
-            float t = -c / b;
-
-            if (t >= 0.0 && t < 1.0)
-                roots.x = t;
-        }
-
-        return roots;
-    }
-
-    float discriminant = b * b - 4.0 * a * c;
-
-    if (discriminant < 0.0)
-        return roots;
-
-    discriminant = max(discriminant, 0.0);
-
-    float sqrt_discriminant = sqrt(discriminant);
-
-    float t1 = (-b + sqrt_discriminant) / (2.0 * a);
-    float t2 = (-b - sqrt_discriminant) / (2.0 * a);
-
-    int count = 0;
-
-    if (t1 >= 0.0 && t1 < 1.0)
-        roots[count++] = t1;
-
-    // Prevent a tangent/double root from being counted twice.
-    if (abs(t2 - t1) > EPSILON &&
-        t2 >= 0.0 &&
-        t2 < 1.0)
-    {
-        roots[count++] = t2;
-    }
-
-    return roots;
+    return (1.0 - t) * (1.0 - t) * u0
+         + 2.0 * t * (1.0 - t) * u1
+         + t * t * u2;
 }
 
 
-// ------------------------------------------------------------
-// Vertical ray:
-// Find t where B_x(t) = ray_x
-// ------------------------------------------------------------
-
-vec2 vert_ray_roots(Curve curve, float ray_x)
+// Paper Eq. (3): fraction of the pixel on the near side of a crossing.
+// distance_em is the crossing's distance from the pixel center along the ray.
+float crossing_fraction(float distance_em)
 {
-    float a = curve.p0.x - 2.0 * curve.p1.x + curve.p2.x;
-    float b = 2.0 * (curve.p1.x - curve.p0.x);
-    float c = curve.p0.x - ray_x;
-
-    vec2 roots = vec2(-1.0);
-
-    // Linear case.
-    if (abs(a) < EPSILON)
-    {
-        if (abs(b) > EPSILON)
-        {
-            float t = -c / b;
-
-            if (t >= 0.0 && t < 1.0)
-                roots.x = t;
-        }
-
-        return roots;
-    }
-
-    float discriminant = b * b - 4.0 * a * c;
-
-    if (discriminant < 0.0)
-        return roots;
-
-    discriminant = max(discriminant, 0.0);
-
-    float sqrt_discriminant = sqrt(discriminant);
-
-    float t1 = (-b + sqrt_discriminant) / (2.0 * a);
-    float t2 = (-b - sqrt_discriminant) / (2.0 * a);
-
-    int count = 0;
-
-    if (t1 >= 0.0 && t1 < 1.0)
-        roots[count++] = t1;
-
-    if (abs(t2 - t1) > EPSILON &&
-        t2 >= 0.0 &&
-        t2 < 1.0)
-    {
-        roots[count++] = t2;
-    }
-
-    return roots;
+    return clamp(distance_em * font_px + 0.5, 0.0, 1.0);
 }
 
 
-// ------------------------------------------------------------
-// Evaluate B_x(t)
-// ------------------------------------------------------------
-
-float curve_x_at(Curve curve, float t)
+// One curve against one ray that points in +u. v is the offset across the ray, so the ray is v = 0.
+// pixel_u is the sample position along the ray.
+// Returns the signed contribution of this curve to the winding number.
+float ray_contribution(
+    float u0, float u1, float u2,
+    float v0, float v1, float v2,
+    float pixel_u)
 {
-    return curve.p0.x
-         + 2.0 * t * (curve.p1.x - curve.p0.x)
-         + t * t *
-           (curve.p0.x - 2.0 * curve.p1.x + curve.p2.x);
-}
+    // Paper Eq. (2): input code, one bit per control point above the ray.
+    int input_code = (v0 > 0.0 ? 2 : 0)
+                   + (v1 > 0.0 ? 4 : 0)
+                   + (v2 > 0.0 ? 8 : 0);
 
+    int output_code = (CONTRIBUTION_TABLE >> input_code) & 3;
 
-// ------------------------------------------------------------
-// Evaluate B_y(t)
-// ------------------------------------------------------------
-
-float curve_y_at(Curve curve, float t)
-{
-    return curve.p0.y
-         + 2.0 * t * (curve.p1.y - curve.p0.y)
-         + t * t *
-           (curve.p0.y - 2.0 * curve.p1.y + curve.p2.y);
-}
-
-
-// ------------------------------------------------------------
-// dB_y/dt
-// Used for horizontal crossings.
-// ------------------------------------------------------------
-
-float curve_y_slope_at(Curve curve, float t)
-{
-    float a = curve.p0.y - 2.0 * curve.p1.y + curve.p2.y;
-    float b = 2.0 * (curve.p1.y - curve.p0.y);
-
-    return 2.0 * a * t + b;
-}
-
-
-// ------------------------------------------------------------
-// dB_x/dt
-// Used for vertical crossings.
-// ------------------------------------------------------------
-
-float curve_x_slope_at(Curve curve, float t)
-{
-    float a = curve.p0.x - 2.0 * curve.p1.x + curve.p2.x;
-    float b = 2.0 * (curve.p1.x - curve.p0.x);
-
-    return 2.0 * a * t + b;
-}
-
-
-// ------------------------------------------------------------
-// Horizontal coverage.
-//
-// Solve B_y(t) = ray_y,
-// then use B_x(t) for the coverage ramp.
-//
-// y decreasing -> +1
-// y increasing -> -1
-// ------------------------------------------------------------
-
-float horizontal_coverage(
-    Curve curve,
-    float t,
-    float ray_x)
-{
-    float x = curve_x_at(curve, t);
-
-    float f = clamp(
-        (x - ray_x) * font_px + 0.5,
-        0.0,
-        1.0
-    );
-
-    float slope = curve_y_slope_at(curve, t);
-
-    // Tangent: curve touches the ray but does not cross it.
-    if (abs(slope) < EPSILON)
+    // Curve never changes the winding number for this ray.
+    if (output_code == 0)
         return 0.0;
 
-    float winding_sign =
-        (slope < 0.0) ? 1.0 : -1.0;
+    // Paper Eq. (1): roots of B_v(t) = 0.
+    float a = v0 - 2.0 * v1 + v2;
+    float b = v0 - v1;
+    float c = v0;
 
-    return winding_sign * f;
+    float t1;
+    float t2;
+
+    if (abs(a) < LINEAR_EPSILON)
+    {
+        // Straight line: one root, shared by both slots.
+        t1 = c / (2.0 * b);
+        t2 = t1;
+    }
+    else
+    {
+        float s = sqrt(max(b * b - a * c, 0.0));
+        t1 = (b - s) / a;
+        t2 = (b + s) / a;
+    }
+
+    float contribution = 0.0;
+
+    if ((output_code & 1) != 0 && t1 >= 0.0 && t1 < 1.0)
+    {
+        contribution += crossing_fraction(bezier_along_ray(u0, u1, u2, t1) - pixel_u);
+    }
+
+    if ((output_code & 2) != 0 && t2 >= 0.0 && t2 < 1.0)
+    {
+        contribution -= crossing_fraction(bezier_along_ray(u0, u1, u2, t2) - pixel_u);
+    }
+
+    return contribution;
 }
 
 
-// ------------------------------------------------------------
-// Vertical coverage.
-//
-// Solve B_x(t) = ray_x,
-// then use B_y(t) for the coverage ramp.
-//
-// x increasing -> +1
-// x decreasing -> -1
-// ------------------------------------------------------------
-
-float vertical_coverage(
-    Curve curve,
-    float t,
-    float ray_y)
+// Horizontal ray at height ray_y, pointing in +x.
+float horizontal_contribution(Curve curve, float ray_y, float pixel_x)
 {
-    float y = curve_y_at(curve, t);
-
-    float f = clamp(
-        (y - ray_y) * font_px + 0.5,
-        0.0,
-        1.0
-    );
-
-    float slope = curve_x_slope_at(curve, t);
-
-    if (abs(slope) < EPSILON)
-        return 0.0;
-
-    float winding_sign =
-        (slope > 0.0) ? 1.0 : -1.0;
-
-    return winding_sign * f;
+    return ray_contribution(
+        curve.p0.x, curve.p1.x, curve.p2.x,
+        curve.p0.y - ray_y, curve.p1.y - ray_y, curve.p2.y - ray_y,
+        pixel_x);
 }
 
 
-// ------------------------------------------------------------
+// Vertical ray at x = ray_x, pointing in +y.
+// Uses the rotation (u, v) = (y, -x), so the sign convention matches the horizontal ray.
+float vertical_contribution(Curve curve, float ray_x, float pixel_y)
+{
+    return ray_contribution(
+        curve.p0.y, curve.p1.y, curve.p2.y,
+        ray_x - curve.p0.x, ray_x - curve.p1.x, ray_x - curve.p2.x,
+        pixel_y);
+}
+
 
 void main()
 {
-    // frag_pos and curve coordinates are assumed to be in
-    // font/em space. Convert the pixel nudge into that space.
-    float ray_y =
-        frag_pos.y + RAY_NUDGE_PX / font_px;
+    float horizontal_sum = 0.0;
+    float vertical_sum   = 0.0;
 
-    float ray_x =
-        frag_pos.x + RAY_NUDGE_PX / font_px;
-
-    float horizontal_coverage_sum = 0.0;
-    float vertical_coverage_sum   = 0.0;
-
-
-    for (int i = int(frag_curve_indicies.x);
-         i < int(frag_curve_indicies.y);
-         ++i)
+    // Sample positions sit on a line across the pixel: horizontal rays shift in y, vertical rays shift in x.
+    for (int s = 0; s < SAMPLES_PER_AXIS; s++)
     {
-        Curve curve = curves[i];
+        float offset_px = (float(s) + 0.5) / float(SAMPLES_PER_AXIS) - 0.5;
+        float offset_em = offset_px / font_px;
 
+        float ray_y = frag_pos.y + offset_em;
+        float ray_x = frag_pos.x + offset_em;
 
-        // ----------------------------------------------------
-        // Horizontal ray
-        // B_y(t) = ray_y
-        // ----------------------------------------------------
-
-        vec2 hroots =
-            horiz_ray_roots(curve, ray_y);
-
-        if (hroots.x >= 0.0)
+        for (int i = int(frag_curve_indicies.x);
+             i < int(frag_curve_indicies.y);
+             ++i)
         {
-            horizontal_coverage_sum +=
-                horizontal_coverage(
-                    curve,
-                    hroots.x,
-                    frag_pos.x
-                );
-        }
+            Curve curve = curves[i];
 
-        if (hroots.y >= 0.0)
-        {
-            horizontal_coverage_sum +=
-                horizontal_coverage(
-                    curve,
-                    hroots.y,
-                    frag_pos.x
-                );
-        }
-
-
-        // ----------------------------------------------------
-        // Vertical ray
-        // B_x(t) = ray_x
-        // ----------------------------------------------------
-
-        vec2 vroots =
-            vert_ray_roots(curve, ray_x);
-
-        if (vroots.x >= 0.0)
-        {
-            vertical_coverage_sum +=
-                vertical_coverage(
-                    curve,
-                    vroots.x,
-                    frag_pos.y
-                );
-        }
-
-        if (vroots.y >= 0.0)
-        {
-            vertical_coverage_sum +=
-                vertical_coverage(
-                    curve,
-                    vroots.y,
-                    frag_pos.y
-                );
+            horizontal_sum += horizontal_contribution(curve, ray_y, frag_pos.x);
+            vertical_sum   += vertical_contribution(curve, ray_x, frag_pos.y);
         }
     }
 
-
-    // Horizontal and vertical rays are two estimates of
-    // the same pixel coverage.
+    // Horizontal and vertical rays are two estimates of the same coverage.
     float coverage =
         0.5 *
         (
-            horizontal_coverage_sum +
-            vertical_coverage_sum
-        );
+            horizontal_sum +
+            vertical_sum
+        ) / float(SAMPLES_PER_AXIS);
 
     float alpha =
         clamp(abs(coverage), 0.0, 1.0);

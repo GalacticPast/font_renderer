@@ -5,8 +5,12 @@
 
 #define ONE_TWENTIETH 0.05f
 
+// logical size: what the compositor lays the window out with
 #define WINDOW_WIDTH 600
 #define WINDOW_HEIGHT 400
+
+// physical pixels per logical unit. Set from the compositor after startup
+static f32 display_scale = 1.0f;
 
 typedef struct camera
 {
@@ -58,6 +62,10 @@ int main()
     if (!success)
         return 0;
 
+    // the scale is known once the platform has talked to the compositor
+    display_scale = platform_get_display_scale();
+    glViewport(0, 0, (s32)(WINDOW_WIDTH * display_scale), (s32)(WINDOW_HEIGHT * display_scale));
+
     camera camera      = {0};
     camera.position    = db_vector3_make(0.0f, 0.0f, 3.0f);
     camera.orientation = db_vector3_make(0.0f, 0.0f, -1.0f);
@@ -76,7 +84,7 @@ int main()
     glyphs *glyphs = text_load_font(&main_arena, "../assets/font/Archivo-Regular.ttf");
 
     //@info:   temp
-    f32       font_size = 24.0f;
+    f32       font_size = 8.0f * display_scale; // 12 logical px, in physical pixels
     db_string str       = db_string_make(
         &main_arena, "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut "
                      "labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco "
@@ -85,7 +93,7 @@ int main()
                      "non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.");
 
     db_array_vector4 txt_buffer = db_array_vector4_init(&main_arena);
-    text_prepare_render_buffer(&str, &txt_buffer, font_size);
+    text_prepare_render_buffer(&str, &txt_buffer, font_size, WINDOW_WIDTH * display_scale);
 
     VAO  b_vao;
     VBO  b_vbo;
@@ -154,7 +162,7 @@ int main()
         camera_set_matrix(&camera, &shader, 0.1f, 100.0f);
 
         vao_bind(&b_vao);
-        // one instance per glyph, not per vec4: each glyph is TEXT_VEC4S_PER_GLYPH consecutive vec4s
+
         glDrawElementsInstanced(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0, txt_buffer.length / TEXT_VEC4S_PER_GLYPH);
 
         platform_swap_buffers();
@@ -170,7 +178,8 @@ void camera_set_matrix(camera *camera, shader *shader, f32 near_plane, f32 far_p
     u32 view_loc       = glGetUniformLocation(shader->program, "view");
 
     db_matrix4 ortho;
-    db_matrix4_ortho2d(&ortho, 0, (f32)WINDOW_WIDTH, (f32)WINDOW_HEIGHT, 0);
+    // the projection works in physical pixels, matching the buffer and font_px
+    db_matrix4_ortho2d(&ortho, 0, (f32)WINDOW_WIDTH * display_scale, (f32)WINDOW_HEIGHT * display_scale, 0);
 
     db_matrix4 view;
     db_matrix4_identity(&view);

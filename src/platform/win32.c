@@ -108,6 +108,11 @@ LRESULT CALLBACK win32_process_message(HWND hwnd, u32 msg, WPARAM w_param, LPARA
     return DefWindowProcA(hwnd, msg, w_param, l_param);
 }
 
+f32 platform_get_display_scale()
+{
+    return 1.0f;
+}
+
 b8 platform_startup(db_arena *arena, char *application_name, s32 x, s32 y, s32 width, s32 height)
 {
     printf("Initializing Windows platform...\n");

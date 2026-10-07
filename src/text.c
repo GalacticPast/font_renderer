@@ -17,10 +17,10 @@ text_state *state;
 
 //@warn: temp
 // for now font size is going to be 12
-void text_prepare_render_buffer(db_string *string, db_array_vector4 *buffer, f32 font_size)
+void text_prepare_render_buffer(db_string *string, db_array_vector4 *buffer, f32 font_size, f32 wrap_width)
 {
-    // for now the width of the window is 600
-    db_vector2 pen_pos = db_vector2_make(0.0, 12.0f);
+    // the first baseline sits one em below the top edge, so the first line is not clipped
+    db_vector2 pen_pos = db_vector2_make(0.0f, font_size);
 
     for (s32 i = 0; i < string->length; i++)
     {
@@ -45,7 +45,7 @@ void text_prepare_render_buffer(db_string *string, db_array_vector4 *buffer, f32
         db_array_vector4_append(buffer, fo_row);
 
         pen_pos.x += g->advance * font_size;
-        if (pen_pos.x >= 600)
+        if (pen_pos.x >= wrap_width)
         {
             pen_pos.x  = 0.0f;
             pen_pos.y += font_size + 3; // this is so random
