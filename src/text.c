@@ -9,7 +9,9 @@ void text_compute_glyph_bbox(glyphs *g);
 
 typedef struct
 {
-    SSBO   gpu_data;
+    SSBO   curves_ssbo;
+    SSBO   horizontal_bands_ssbo;
+    SSBO   vertical_bands_ssbo;
     glyphs glyphs; // for now there's only one
 } text_state;
 
@@ -36,11 +38,19 @@ void text_prepare_render_buffer(db_string *string, db_array_vector4 *buffer, f32
                                             g->translation_matrix.data[10], g->translation_matrix.data[11]);
         db_vector4 fo_row = db_vector4_make(g->translation_matrix.data[12], g->translation_matrix.data[13],
                                             g->translation_matrix.data[14], g->translation_matrix.data[15]);
+
         db_array_vector4_append(buffer, v);
         db_array_vector4_append(buffer, fr_row);
         db_array_vector4_append(buffer, s_row);
         db_array_vector4_append(buffer, t_row);
         db_array_vector4_append(buffer, fo_row);
+
+        for (s32 j = 0; j < NUMBER_OF_BANDS * 2; j += 2)
+        {
+            db_vector4 bands_ind =
+                db_vector4_make(g->bands_loc[j].x, g->bands_loc[j].y, g->bands_loc[j + 1].x, g->bands_loc[j + 1].y);
+            db_array_vector4_append(buffer, bands_ind);
+        }
 
         pen_pos.x += g->advance * font_size;
         if (pen_pos.x >= wrap_width)
@@ -136,8 +146,16 @@ glyphs *text_load_font(db_arena *arena, const char *file_path)
     text_compute_glyph_bbox(&glyphs);
 
     // upload to gpu.
-    ssbo_create(&(state->gpu_data), 1, glyphs.curves.data, sizeof(curve), glyphs.curves.length);
-    ssbo_bind(&(state->gpu_data));
+    ssbo_create(&(state->curves_ssbo), 1, glyphs.curves.data, sizeof(curve), glyphs.curves.length);
+    ssbo_bind(&(state->curves_ssbo));
+
+    ssbo_create(&(state->horizontal_bands_ssbo), 2, glyphs.horizontal_bands.data, sizeof(s32),
+                glyphs.horizontal_bands.length);
+    ssbo_bind(&(state->horizontal_bands_ssbo));
+
+    ssbo_create(&(state->vertical_bands_ssbo), 3, glyphs.vertical_bands.data, sizeof(s32),
+                glyphs.vertical_bands.length);
+    ssbo_bind(&(state->vertical_bands_ssbo));
 
     state->glyphs = glyphs;
 
@@ -158,10 +176,6 @@ b8 compare_s32(s32 *a, s32 *b)
 
 void text_compute_glyph_bbox(glyphs *g)
 {
-
-    s32 len = g->curves.length;
-
-    db_arena temp = db_arena_init();
     for (s32 i = 0; i < 95; i++)
     {
         db_vector2 min = db_vector2_make(DB_MATH_F32_MAX, DB_MATH_F32_MAX);
@@ -234,16 +248,17 @@ void text_compute_glyph_bbox(glyphs *g)
 
         db_matrix4_mul(&g->data[i].translation_matrix, &translate_matrix, &scale_matrix);
 
-        s32 band_count    = 8;
+        s32 band_count    = NUMBER_OF_BANDS;
         f32 eps           = 1.0f / 1024.0f;
         // horizontal banding
         f32 h_band_height = (max.y - min.y) / ((f32)band_count);
 
-        db_array_s32 indices = db_array_s32_init(&temp);
-        for (s32 i = 0; i < band_count; ++i)
+        for (s32 b = 0; b < band_count; b++)
         {
-            f32 band_min_y = min.y + (f32)i * h_band_height - eps;
-            f32 band_max_y = min.y + (f32)(i + 1) * h_band_height + eps;
+            f32 band_min_y = min.y + (f32)b * h_band_height - eps;
+            f32 band_max_y = min.y + (f32)(b + 1) * h_band_height + eps;
+
+            g->data[i].bands_loc[b].x = g->horizontal_bands.length;
             for (int j = start; j < end; j++)
             {
                 curve *c = &g->curves.data[j];
@@ -256,26 +271,20 @@ void text_compute_glyph_bbox(glyphs *g)
                 if (db_min3(c->p0.y, c->p1.y, c->p2.y) <= band_max_y &&
                     db_max3(c->p0.y, c->p1.y, c->p2.y) >= band_min_y)
                 {
-                    db_array_s32_append(&indices, j - start);
+                    db_array_s32_append(&g->horizontal_bands, j);
                 }
             }
+            g->data[i].bands_loc[b].y = g->horizontal_bands.length;
         }
-
-        s32 *itr                               = NULL;
-        s32  ind                               = 0;
-        g->data[i].horizontal_bands_indicies.x = g->horizontal_bands.length;
-        db_array_for_each_ptr(indices, ind, itr)
-        {
-            db_array_s32_append(&g->horizontal_bands, *itr);
-        }
-        g->data[i].horizontal_bands_indicies.y = g->horizontal_bands.length;
-        db_array_s32_clear(&indices);
 
         f32 v_band_height = (max.x - min.x) / ((f32)band_count);
-        for (s32 i = 0; i < band_count; ++i)
+        for (s32 b = 0; b < band_count; b++)
         {
-            f32 band_min_x = min.x + (f32)i * v_band_height - eps;
-            f32 band_max_x = min.x + (f32)(i + 1) * v_band_height + eps;
+            f32 band_min_x = min.x + (f32)b * v_band_height - eps;
+            f32 band_max_x = min.x + (f32)(b + 1) * v_band_height + eps;
+
+            g->data[i].bands_loc[b + band_count].x = g->vertical_bands.length;
+
             for (int j = start; j < end; j++)
             {
                 curve *c = &g->curves.data[j];
@@ -288,21 +297,10 @@ void text_compute_glyph_bbox(glyphs *g)
                 if (db_min3(c->p0.x, c->p1.x, c->p2.x) <= band_max_x &&
                     db_max3(c->p0.x, c->p1.x, c->p2.x) >= band_min_x)
                 {
-                    db_array_s32_append(&indices, j - start);
+                    db_array_s32_append(&g->vertical_bands, j);
                 }
             }
+            g->data[i].bands_loc[b + band_count].y = g->vertical_bands.length;
         }
-
-        itr                                  = NULL;
-        ind                                  = 0;
-        g->data[i].vertical_bands_indicies.x = g->vertical_bands.length;
-        db_array_for_each_ptr(indices, ind, itr)
-        {
-            db_array_s32_append(&g->vertical_bands, *itr);
-        }
-        g->data[i].vertical_bands_indicies.y = g->vertical_bands.length;
-        db_arena_reset(&temp);
     }
-    db_arena_free(&temp);
 }
-// return fabs(p0.x - p2.x) < 1e-5 && fabs(p1.x - (p0.x + p2.x) * 0.5) < 1e-5;

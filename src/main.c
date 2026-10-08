@@ -85,12 +85,7 @@ int main()
 
     //@info:   temp
     f32       font_size = 24.0f * display_scale; // 12 logical px, in physical pixels
-    db_string str       = db_string_make(
-        &main_arena, "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut "
-                     "labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco "
-                     "laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in "
-                     "voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat "
-                     "non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.");
+    db_string str       = db_string_make(&main_arena, "DDDDDDDDDDDDDDDDDDDDDDD");
 
     db_array_vector4 txt_buffer = db_array_vector4_init(&main_arena);
     text_prepare_render_buffer(&str, &txt_buffer, font_size, WINDOW_WIDTH * display_scale);
@@ -109,20 +104,33 @@ int main()
     vao_link_vbo_attribs(&b_vao, &b_vbo, 0, 3, GL_FLOAT, 3 * sizeof(f32), (void *)0);
 
     vbo_create(&instanced_vbo, (GLfloat *)txt_buffer.data, txt_buffer.length * txt_buffer.type_size);
-    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 1, 2, GL_FLOAT, 20 * sizeof(f32), (void *)0);
-    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 2, 2, GL_FLOAT, 20 * sizeof(f32), (void *)(2 * sizeof(f32)));
+
+    s_size stride = 18 * sizeof(db_vector2) + 4 * sizeof(db_vector4);
+    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 1, 2, GL_FLOAT, stride, (void *)0);
+    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 2, 2, GL_FLOAT, stride, (void *)(2 * sizeof(f32)));
 
     // mat4 takes locations 3..6, one vec4 column each
-    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 3, 4, GL_FLOAT, 20 * sizeof(f32), (void *)(4 * sizeof(f32)));
-    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 4, 4, GL_FLOAT, 20 * sizeof(f32), (void *)(8 * sizeof(f32)));
-    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 5, 4, GL_FLOAT, 20 * sizeof(f32), (void *)(12 * sizeof(f32)));
-    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 6, 4, GL_FLOAT, 20 * sizeof(f32), (void *)(16 * sizeof(f32)));
-    glVertexAttribDivisor(1, 1);
-    glVertexAttribDivisor(2, 1);
-    glVertexAttribDivisor(3, 1);
-    glVertexAttribDivisor(4, 1);
-    glVertexAttribDivisor(5, 1);
-    glVertexAttribDivisor(6, 1);
+    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 3, 4, GL_FLOAT, stride, (void *)(4 * sizeof(f32)));
+    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 4, 4, GL_FLOAT, stride, (void *)(8 * sizeof(f32)));
+    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 5, 4, GL_FLOAT, stride, (void *)(12 * sizeof(f32)));
+    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 6, 4, GL_FLOAT, stride, (void *)(16 * sizeof(f32)));
+
+    // h_band_loc mat4 takes locations 7..10, packing bands_loc[0..7] (horizontal) two bands per column
+    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 7, 4, GL_FLOAT, stride, (void *)(20 * sizeof(f32)));
+    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 8, 4, GL_FLOAT, stride, (void *)(24 * sizeof(f32)));
+    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 9, 4, GL_FLOAT, stride, (void *)(28 * sizeof(f32)));
+    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 10, 4, GL_FLOAT, stride, (void *)(32 * sizeof(f32)));
+
+    // v_band_loc mat4 takes locations 11..14, packing bands_loc[8..15] (vertical) two bands per column
+    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 11, 4, GL_FLOAT, stride, (void *)(36 * sizeof(f32)));
+    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 12, 4, GL_FLOAT, stride, (void *)(40 * sizeof(f32)));
+    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 13, 4, GL_FLOAT, stride, (void *)(44 * sizeof(f32)));
+    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 14, 4, GL_FLOAT, stride, (void *)(48 * sizeof(f32)));
+
+    for (int i = 1; i <= 14; i++)
+    {
+        glVertexAttribDivisor(i, 1);
+    }
 
     ebo_create(&b_ebo, indices, sizeof(indices));
     ebo_bind(&b_ebo);

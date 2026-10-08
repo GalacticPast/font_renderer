@@ -12,12 +12,23 @@ layout(std430, binding = 1) buffer curve_buffer
     Curve curves[];
 };
 
+layout(std430, binding = 2) buffer h_bands{
+    int horizontal_bands[];
+};
+layout(std430, binding = 3) buffer v_bands{
+    int vertical_bands[];
+};
+
 
 out vec4 FragColor;
 
 in vec2 frag_pos;
 
 flat in vec2 frag_curve_indicies;
+flat in mat4 frag_h_band_loc;
+flat in mat4 frag_v_band_loc;
+flat in vec2 frag_glyph_min;
+flat in vec2 frag_glyph_max;
 
 uniform float font_px;
 
@@ -29,6 +40,17 @@ uniform float font_px;
 
 // The paper's only tolerance: a near-zero quadratic term means the curve is a straight line.
 #define LINEAR_EPSILON 1e-6
+
+// number of bands a glyph's bbox is split into, per axis. Must match NUMBER_OF_BANDS in text.h
+#define NUMBER_OF_BANDS 8
+
+// bands_loc packs two bands per mat4 column: column c holds band 2c in .xy and band 2c+1 in .zw.
+// Returns (start, end) into horizontal_bands / vertical_bands for band b.
+vec2 band_range(mat4 packed_bands, int b)
+{
+    vec4 col = packed_bands[b / 2];
+    return (b % 2 == 0) ? col.xy : col.zw;
+}
 
 
 // Evaluate B(t) along the ray's axis: (1-t)^2 p0 + 2t(1-t) p1 + t^2 p2
@@ -130,6 +152,23 @@ void main()
     float horizontal_sum = 0.0;
     float vertical_sum   = 0.0;
 
+    // Which band this fragment falls in, per axis (same bucketing math the CPU-side band build used).
+    float h_band_height = max(frag_glyph_max.y - frag_glyph_min.y, LINEAR_EPSILON) / float(NUMBER_OF_BANDS);
+    int   h_band        = clamp(int((frag_pos.y - frag_glyph_min.y) / h_band_height), 0, NUMBER_OF_BANDS - 1);
+    vec2  h_range        = band_range(frag_h_band_loc, h_band);
+
+    float v_band_height = max(frag_glyph_max.x - frag_glyph_min.x, LINEAR_EPSILON) / float(NUMBER_OF_BANDS);
+    int   v_band        = clamp(int((frag_pos.x - frag_glyph_min.x) / v_band_height), 0, NUMBER_OF_BANDS - 1);
+    vec2  v_range        = band_range(frag_v_band_loc, v_band);
+
+    // @debug: the curve index actually fetched via horizontal_bands[h_range.x] -- i.e. one hop further
+    // than the last test. D's real curve indices run 660-675 (from the earlier CPU dump), scaled to
+    // fit that into [0,1]. If THIS is wrong/flat while h_range.x was a clean staircase, the bug is in
+    // the horizontal_bands[] SSBO content/indexing, not in band_range().
+    int fetched_curve_index = horizontal_bands[int(h_range.x)];
+    FragColor = vec4(vec3(clamp((float(fetched_curve_index) - 655.0) / 25.0, 0.0, 1.0)), 1.0);
+    return;
+
     // Sample positions sit on a line across the pixel: horizontal rays shift in y, vertical rays shift in x.
     for (int s = 0; s < SAMPLES_PER_AXIS; s++)
     {
@@ -139,14 +178,16 @@ void main()
         float ray_y = frag_pos.y + offset_em;
         float ray_x = frag_pos.x + offset_em;
 
-        for (int i = int(frag_curve_indicies.x);
-             i < int(frag_curve_indicies.y);
-             ++i)
+        for (int k = int(h_range.x); k < int(h_range.y); ++k)
         {
-            Curve curve = curves[i];
-
+            Curve curve = curves[horizontal_bands[k]];
             horizontal_sum += horizontal_contribution(curve, ray_y, frag_pos.x);
-            vertical_sum   += vertical_contribution(curve, ray_x, frag_pos.y);
+        }
+
+        for (int k = int(v_range.x); k < int(v_range.y); ++k)
+        {
+            Curve curve = curves[vertical_bands[k]];
+            vertical_sum += vertical_contribution(curve, ray_x, frag_pos.y);
         }
     }
 
