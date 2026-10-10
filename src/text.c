@@ -186,9 +186,10 @@ void text_compute_glyph_bbox(glyphs *g)
 
         if (start == end)
         {
-            g->data[i].aabb.center    = db_vector2_make(0.0f, 0.0f);
-            g->data[i].aabb.half_size = db_vector2_make(0.0f, 0.0f);
-            db_matrix4_identity(&g->data[i].translation_matrix);
+            // g->data[i].aabb.center     = db_vector2_zero();
+            // g->data[i].aabb.half_size  = db_vector2_zero();
+            // g->data[i].curves_indicies = db_vector2_zero();
+            // db_matrix4_identity(&g->data[i].translation_matrix);
             continue;
         }
 
@@ -248,11 +249,15 @@ void text_compute_glyph_bbox(glyphs *g)
 
         db_matrix4_mul(&g->data[i].translation_matrix, &translate_matrix, &scale_matrix);
 
-        s32 band_count    = NUMBER_OF_BANDS;
-        f32 eps           = 1.0f / 1024.0f;
+        s32 band_count = NUMBER_OF_BANDS;
+        f32 eps        = 1.0f / 1024.0f;
+
+        // @info: there is an indexing error in horizontal_bands
+        // if (i != ('A' - ' ') && i != ('D' - ' '))
+        //     continue;
+
         // horizontal banding
         f32 h_band_height = (max.y - min.y) / ((f32)band_count);
-
         for (s32 b = 0; b < band_count; b++)
         {
             f32 band_min_y = min.y + (f32)b * h_band_height - eps;
@@ -263,7 +268,7 @@ void text_compute_glyph_bbox(glyphs *g)
             {
                 curve *c = &g->curves.data[j];
                 // check if it is horizontal
-                if (fabs(c->p0.y - c->p2.y) < 1e-5 && fabs(c->p1.y - (c->p0.y + c->p2.y) * 0.5) < 1e-5)
+                if (fabs(c->p0.y - c->p2.y) < 1e-6 && fabs(c->p1.y - (c->p0.y + c->p2.y) * 0.5) < 1e-6)
                 {
                     continue;
                 }

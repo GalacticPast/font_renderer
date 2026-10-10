@@ -85,7 +85,9 @@ int main()
 
     //@info:   temp
     f32       font_size = 24.0f * display_scale; // 12 logical px, in physical pixels
-    db_string str       = db_string_make(&main_arena, "DDDDDDDDDDDDDDDDDDDDDDD");
+    db_string str       = db_string_make(
+        &main_arena, "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+                     ")");
 
     db_array_vector4 txt_buffer = db_array_vector4_init(&main_arena);
     text_prepare_render_buffer(&str, &txt_buffer, font_size, WINDOW_WIDTH * display_scale);

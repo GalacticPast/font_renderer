@@ -448,7 +448,7 @@ typedef struct db_array_skeleton
     static inline s64 db_array_##name##_capacity(db_array_##name *a)                                                   \
     {                                                                                                                  \
         ASSERT(a);                                                                                                     \
-        return a->total_length / a->type_size;                                                                         \
+        return a->total_length;                                                                                        \
     }                                                                                                                  \
     static inline void db_array##name##_free(db_array_##name *a)                                                       \
     {                                                                                                                  \
@@ -1373,8 +1373,8 @@ db_return_code __db_array_resize(db_array_skeleton *array)
     size_t new_size = array->total_length * DB_ARRAY_DEFAULT_RESIZE_FACTOR;
     void  *new_mem  = db_arena_alloc(array->arena, new_size * array->type_size);
     memcpy(new_mem, array->data, array->length * array->type_size);
-    array->data          = new_mem;
-    array->total_length += new_size;
+    array->data         = new_mem;
+    array->total_length = new_size;
     return DB_SUCCESS;
 }
 
@@ -1527,8 +1527,8 @@ db_return_code __db_stack_resize(db_stack_skeleton *stack)
     size_t new_size = stack->total_length * DB_ARRAY_DEFAULT_RESIZE_FACTOR;
     void  *new_mem  = db_arena_alloc(stack->arena, new_size * stack->type_size);
     memcpy(new_mem, stack->data, stack->length * stack->type_size);
-    stack->data          = new_mem;
-    stack->total_length += new_size;
+    stack->data         = new_mem;
+    stack->total_length = new_size;
     return DB_SUCCESS;
 }
 
