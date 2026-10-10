@@ -34,6 +34,8 @@ void vao_unbind();
 void vao_delete(VAO *vao_object);
 
 void vbo_create(VBO *vbo_object, GLfloat *vertices, GLsizeiptr size);
+void vbo_create_dynamic(VBO *vbo_object, GLsizeiptr size);
+void vbo_update(VBO *vbo_object, void *data, GLsizeiptr size);
 void vbo_bind(VBO *vbo_object);
 void vbo_unbind();
 void vbo_delete(VBO *vbo_object);

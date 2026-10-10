@@ -9,23 +9,92 @@ void text_compute_glyph_bbox(glyphs *g);
 
 typedef struct
 {
-    SSBO   curves_ssbo;
-    SSBO   horizontal_bands_ssbo;
-    SSBO   vertical_bands_ssbo;
     glyphs glyphs; // for now there's only one
 } text_state;
 
-text_state *state;
+text_state *t_state;
+
+static f32 text_line_height()
+{
+    return t_state->glyphs.ascent - t_state->glyphs.descent + t_state->glyphs.line_gap;
+}
+
+// bytes outside ASCII (e.g. UTF-8 lead bytes, negative as signed char) fall back to '?'
+static glyph_data *text_get_glyph(char c)
+{
+    u8 code = (u8)c;
+    if (code >= TEXT_GLYPH_COUNT)
+        code = '?';
+    return &t_state->glyphs.data[code];
+}
+
+static f32 text_next_tab_stop(f32 pen_x, f32 font_size)
+{
+    f32 tab = TEXT_TAB_WIDTH * t_state->glyphs.data[' '].advance * font_size;
+    return (db_floor(pen_x / tab) + 1.0f) * tab;
+}
+
+// no wrapping: only '\n' starts a new line
+db_vector2 text_calculate_size(const char *string, s_size length, f32 font_size)
+{
+    ASSERT_WITH_MSG(string, "String is empty");
+
+    f32 line_width = 0.0f;
+    f32 max_width  = 0.0f;
+    s32 line_count = 1;
+
+    for (s64 i = 0; i < (s64)length; i++)
+    {
+        char c = string[i];
+        if (c == '\n')
+        {
+            max_width  = db_max(max_width, line_width);
+            line_width = 0.0f;
+            line_count++;
+            continue;
+        }
+        if (c == '\t')
+        {
+            line_width = text_next_tab_stop(line_width, font_size);
+            continue;
+        }
+        if ((u8)c < ' ' || c == 127)
+            continue;
+
+        line_width += text_get_glyph(c)->advance * font_size;
+    }
+    max_width = db_max(max_width, line_width);
+
+    return db_vector2_make(max_width, line_count * text_line_height() * font_size);
+}
 
 void text_prepare_render_buffer(db_string *string, db_array_vector4 *buffer, f32 font_size, f32 wrap_width)
 {
-    // the first baseline sits one em below the top edge, so the first line is not clipped
-    db_vector2 pen_pos = db_vector2_make(0.0f, font_size);
-
+    db_vector2 pen_pos = db_vector2_make(0.0f, t_state->glyphs.ascent * font_size);
     for (s32 i = 0; i < string->length; i++)
     {
-        char        c = string->data[i];
-        glyph_data *g = &state->glyphs.data[c - ' '];
+        char c = string->data[i];
+        if (c == '\n')
+        {
+            pen_pos.x  = 0.0f;
+            pen_pos.y += text_line_height() * font_size;
+            continue;
+        }
+        if (c == '\t')
+        {
+            pen_pos.x = text_next_tab_stop(pen_pos.x, font_size);
+            continue;
+        }
+        // '\r' and every other control code: no glyph, no advance
+        if ((u8)c < ' ' || c == 127)
+            continue;
+
+        glyph_data *g = text_get_glyph(c);
+        if (pen_pos.x + g->advance * font_size > wrap_width)
+        {
+            pen_pos.x  = 0.0f;
+            pen_pos.y += text_line_height() * font_size;
+        }
 
         // pen goes to em here, so only the pen is scaled. The matrix is already in em
         db_vector4 v =
@@ -53,12 +122,8 @@ void text_prepare_render_buffer(db_string *string, db_array_vector4 *buffer, f32
         }
 
         pen_pos.x += g->advance * font_size;
-        if (pen_pos.x >= wrap_width)
-        {
-            pen_pos.x  = 0.0f;
-            pen_pos.y += font_size + 3; // this is so random
-        }
     }
+    __text_update_gpu_buffer(buffer->data, buffer->length * buffer->type_size);
 }
 
 glyphs *text_load_font(db_arena *arena, const char *file_path)
@@ -70,7 +135,7 @@ glyphs *text_load_font(db_arena *arena, const char *file_path)
     b8             res       = stbtt_InitFont(&font_info, font_content.data, 0);
     ASSERT_WITH_MSG(res, "font loeading failed");
 
-    state = db_arena_alloc(arena, sizeof(text_state));
+    t_state = db_arena_alloc(arena, sizeof(text_state));
 
     glyphs glyphs           = {};
     glyphs.curves           = db_array_curves_init(arena);
@@ -78,19 +143,31 @@ glyphs *text_load_font(db_arena *arena, const char *file_path)
     glyphs.vertical_bands   = db_array_s32_init(arena);
     glyphs.funit_to_em      = stbtt_ScaleForMappingEmToPixels(&font_info, 1.0);
 
-    for (s32 i = 0; i <= ('~' - ' '); i++)
+    s32 ascent   = 0;
+    s32 descent  = 0;
+    s32 line_gap = 0;
+    stbtt_GetFontVMetrics(&font_info, &ascent, &descent, &line_gap);
+    glyphs.ascent   = ascent * glyphs.funit_to_em;
+    glyphs.descent  = descent * glyphs.funit_to_em;
+    glyphs.line_gap = line_gap * glyphs.funit_to_em;
+
+    for (s32 i = 0; i < TEXT_GLYPH_COUNT; i++)
     {
-        s32 glyph_index = stbtt_FindGlyphIndex(&font_info, (s32)(' ' + i));
+        // control codes map to .notdef (a box) in most fonts; leave them empty instead
+        if (i < ' ' || i == 127)
+            continue;
 
-        stbtt_vertex *vertices      = NULL;
-        b32           vertices_size = stbtt_GetGlyphShape(&font_info, glyph_index, &vertices);
+        s32         glyph_index = stbtt_FindGlyphIndex(&font_info, (s32)i);
+        glyph_data *g_data      = &glyphs.data[i];
 
-        glyph_data *g_data = &glyphs.data[i];
-
+        // the advance is needed even when there is no outline (space)
         s32 advance_funits    = 0;
         s32 left_side_bearing = 0;
         stbtt_GetGlyphHMetrics(&font_info, glyph_index, &advance_funits, &left_side_bearing);
         g_data->advance = advance_funits * glyphs.funit_to_em;
+
+        stbtt_vertex *vertices      = NULL;
+        b32           vertices_size = stbtt_GetGlyphShape(&font_info, glyph_index, &vertices);
 
         g_data->curves_indicies.x = glyphs.curves.length;
         db_vector4 curr_point     = db_vector4_zero();
@@ -145,21 +222,11 @@ glyphs *text_load_font(db_arena *arena, const char *file_path)
 
     text_compute_glyph_bbox(&glyphs);
 
-    // upload to gpu.
-    ssbo_create(&(state->curves_ssbo), 1, glyphs.curves.data, sizeof(curve), glyphs.curves.length);
-    ssbo_bind(&(state->curves_ssbo));
+    __text_upload_to_gpu(&glyphs);
 
-    ssbo_create(&(state->horizontal_bands_ssbo), 2, glyphs.horizontal_bands.data, sizeof(s32),
-                glyphs.horizontal_bands.length);
-    ssbo_bind(&(state->horizontal_bands_ssbo));
+    t_state->glyphs = glyphs;
 
-    ssbo_create(&(state->vertical_bands_ssbo), 3, glyphs.vertical_bands.data, sizeof(s32),
-                glyphs.vertical_bands.length);
-    ssbo_bind(&(state->vertical_bands_ssbo));
-
-    state->glyphs = glyphs;
-
-    return &state->glyphs;
+    return &t_state->glyphs;
 }
 
 static f32 solve_bezier(f32 a, f32 b, f32 c, f32 t)
@@ -176,7 +243,7 @@ b8 compare_s32(s32 *a, s32 *b)
 
 void text_compute_glyph_bbox(glyphs *g)
 {
-    for (s32 i = 0; i < 95; i++)
+    for (s32 i = 0; i < TEXT_GLYPH_COUNT; i++)
     {
         db_vector2 min = db_vector2_make(DB_MATH_F32_MAX, DB_MATH_F32_MAX);
         db_vector2 max = db_vector2_make(DB_MATH_F32_MIN, DB_MATH_F32_MIN);
@@ -251,10 +318,6 @@ void text_compute_glyph_bbox(glyphs *g)
 
         s32 band_count = NUMBER_OF_BANDS;
         f32 eps        = 1.0f / 1024.0f;
-
-        // @info: there is an indexing error in horizontal_bands
-        // if (i != ('A' - ' ') && i != ('D' - ' '))
-        //     continue;
 
         // horizontal banding
         f32 h_band_height = (max.y - min.y) / ((f32)band_count);

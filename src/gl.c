@@ -1,4 +1,5 @@
 #include "gl.h"
+//
 // vertex array object -> save state
 void vao_create(VAO *vao_object)
 {
@@ -32,6 +33,19 @@ void vbo_create(VBO *vbo_object, GLfloat *vertices, GLsizeiptr size)
     glGenBuffers(1, &vbo_object->id);
     glBindBuffer(GL_ARRAY_BUFFER, vbo_object->id);
     glBufferData(GL_ARRAY_BUFFER, size, vertices, GL_STATIC_DRAW);
+}
+
+void vbo_create_dynamic(VBO *vbo_object, GLsizeiptr size)
+{
+    glGenBuffers(1, &vbo_object->id);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo_object->id);
+    glBufferData(GL_ARRAY_BUFFER, size, NULL, GL_DYNAMIC_DRAW);
+}
+
+void vbo_update(VBO *vbo_object, void *data, GLsizeiptr size)
+{
+    glBindBuffer(GL_ARRAY_BUFFER, vbo_object->id);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, size, data);
 }
 
 void vbo_bind(VBO *vbo_object)

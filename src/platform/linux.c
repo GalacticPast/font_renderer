@@ -283,11 +283,11 @@ bool platform_pump_messages()
 
 void platform_get_window_dimensions(u32 *width, u32 *height)
 {
-    if (platform_state_ptr->width != 0 || platform_state_ptr->height != 0)
-    {
-        *width  = platform_state_ptr->width;
-        *height = platform_state_ptr->height;
-    }
+    // welp it its zero that means it f'ed up
+    ASSERT_WITH_MSG(platform_state_ptr->width, "window width is zero");
+    ASSERT_WITH_MSG(platform_state_ptr->height, "window height is zero");
+    *width  = platform_state_ptr->width;
+    *height = platform_state_ptr->height;
 }
 
 // vulkan
@@ -1145,6 +1145,9 @@ b8 platform_startup(db_arena *arena, char *application_name, s32 x, s32 y, s32 w
     //
     // zxdg_toplevel_decoration_v1_set_mode(state->zxdg_toplevel_decoration_v1,
     //                                      ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
+
+    state->width  = width;
+    state->height = height;
 
     return true;
 }

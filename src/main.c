@@ -6,8 +6,6 @@
 #define ONE_TWENTIETH 0.05f
 
 // logical size: what the compositor lays the window out with
-#define WINDOW_WIDTH 600
-#define WINDOW_HEIGHT 400
 
 // physical pixels per logical unit. Set from the compositor after startup
 static f32 display_scale = 1.0f;
@@ -26,32 +24,17 @@ typedef struct camera
 } camera;
 
 void camera_set_matrix(camera *camera, shader *shader, f32 near_plane, f32 far_plane);
-b8   update(db_arena *main_arena);
+b8   update(db_arena *frame_arena, f32 *font_size);
 void render_text(db_string *string, f32 font_size);
 
 b8 opengl_startup(db_arena *main_arena)
 {
-    b8 success = platform_startup(main_arena, "slug", 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
+    b8 success = platform_startup(main_arena, "slug", 0, 0, 600, 400);
     if (!success)
         return false;
     input_initialize(main_arena);
     return true;
 }
-
-// clang-format off
-f32 vertices[] =
-{ //     COORDINATES
-	-0.5f, -0.5f, 0.0f,
-	 0.5f, -0.5f, 0.0f,
-	 0.5f,  0.5f, 0.0f,
-	-0.5f,  0.5f, 0.0f,
-};
-u32 indices[] =
-{
-	0, 1, 2,
-	0, 2, 3,
-};
-// clang-format on
 
 int main()
 {
@@ -62,10 +45,16 @@ int main()
     if (!success)
         return 0;
 
+    text_init(&main_arena);
+
     // the scale is known once the platform has talked to the compositor
     display_scale = platform_get_display_scale();
-    glViewport(0, 0, (s32)(WINDOW_WIDTH * display_scale), (s32)(WINDOW_HEIGHT * display_scale));
+    u32 width, height;
+    platform_get_window_dimensions(&width, &height);
 
+    glViewport(0, 0, (s32)(width * display_scale), (s32)(height * display_scale));
+
+    // UI and text share the same camera
     camera camera      = {0};
     camera.position    = db_vector3_make(0.0f, 0.0f, 3.0f);
     camera.orientation = db_vector3_make(0.0f, 0.0f, -1.0f);
@@ -75,67 +64,10 @@ int main()
     camera.fov         = 45.0f;
     camera.sensitivity = 0.1f; // change this value to your liking
 
-    shader shader = {0};
-    b8     a = shader_create(&main_arena, &shader, "../assets/shaders/vertex.glsl", "../assets/shaders/fragment.glsl");
-
-    if (!a)
-        return false;
-
     glyphs *glyphs = text_load_font(&main_arena, "../assets/font/Archivo-Regular.ttf");
 
-    //@info:   temp
-    f32       font_size = 24.0f * display_scale; // 12 logical px, in physical pixels
-    db_string str       = db_string_make(
-        &main_arena, "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
-                     ")");
+    f32 font_size = 24.0f * display_scale; // 12 logical px, in physical pixels
 
-    db_array_vector4 txt_buffer = db_array_vector4_init(&main_arena);
-    text_prepare_render_buffer(&str, &txt_buffer, font_size, WINDOW_WIDTH * display_scale);
-
-    VAO  b_vao;
-    VBO  b_vbo;
-    EBO  b_ebo;
-    SSBO b_ssbo;
-
-    VBO instanced_vbo;
-
-    vao_create(&b_vao);
-    vao_bind(&b_vao);
-
-    vbo_create(&b_vbo, vertices, sizeof(vertices));
-    vao_link_vbo_attribs(&b_vao, &b_vbo, 0, 3, GL_FLOAT, 3 * sizeof(f32), (void *)0);
-
-    vbo_create(&instanced_vbo, (GLfloat *)txt_buffer.data, txt_buffer.length * txt_buffer.type_size);
-
-    s_size stride = 18 * sizeof(db_vector2) + 4 * sizeof(db_vector4);
-    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 1, 2, GL_FLOAT, stride, (void *)0);
-    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 2, 2, GL_FLOAT, stride, (void *)(2 * sizeof(f32)));
-
-    // mat4 takes locations 3..6, one vec4 column each
-    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 3, 4, GL_FLOAT, stride, (void *)(4 * sizeof(f32)));
-    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 4, 4, GL_FLOAT, stride, (void *)(8 * sizeof(f32)));
-    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 5, 4, GL_FLOAT, stride, (void *)(12 * sizeof(f32)));
-    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 6, 4, GL_FLOAT, stride, (void *)(16 * sizeof(f32)));
-
-    // h_band_loc mat4 takes locations 7..10, packing bands_loc[0..7] (horizontal) two bands per column
-    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 7, 4, GL_FLOAT, stride, (void *)(20 * sizeof(f32)));
-    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 8, 4, GL_FLOAT, stride, (void *)(24 * sizeof(f32)));
-    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 9, 4, GL_FLOAT, stride, (void *)(28 * sizeof(f32)));
-    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 10, 4, GL_FLOAT, stride, (void *)(32 * sizeof(f32)));
-
-    // v_band_loc mat4 takes locations 11..14, packing bands_loc[8..15] (vertical) two bands per column
-    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 11, 4, GL_FLOAT, stride, (void *)(36 * sizeof(f32)));
-    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 12, 4, GL_FLOAT, stride, (void *)(40 * sizeof(f32)));
-    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 13, 4, GL_FLOAT, stride, (void *)(44 * sizeof(f32)));
-    vao_link_vbo_attribs(&b_vao, &instanced_vbo, 14, 4, GL_FLOAT, stride, (void *)(48 * sizeof(f32)));
-
-    for (int i = 1; i <= 14; i++)
-    {
-        glVertexAttribDivisor(i, 1);
-    }
-
-    ebo_create(&b_ebo, indices, sizeof(indices));
-    ebo_bind(&b_ebo);
     // for now render A
 
     vao_unbind();
@@ -147,74 +79,53 @@ int main()
 
     b8  run = true;
     s32 i   = 0;
-    s32 mod = '~' - '!';
+
+    db_arena frame_arena = db_arena_init_with_size(NULL, MB(1));
 
     while (run)
     {
         input_update(0);
         if (!platform_pump_messages())
             break;
-        run = update(&main_arena);
-        if (input_is_key_down(KEY_D))
-        {
-            font_size += 2.0f;
-        }
-        if (input_is_key_down(KEY_A))
-        {
-            font_size -= 2.0f;
-        }
+
+        run = update(&frame_arena, &font_size);
+
+        db_string str = db_string_make(
+            &frame_arena,
+            "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+            ")");
+        db_array_vector4 txt_buffer = db_array_vector4_init(&frame_arena);
+        text_prepare_render_buffer(&str, &txt_buffer, font_size, width * display_scale);
 
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
         glClear(GL_COLOR_BUFFER_BIT);
 
-        shader_use(&shader);
-
-        glUniform1f(glGetUniformLocation(shader.program, "font_px"), font_size);
-
-        camera_set_matrix(&camera, &shader, 0.1f, 100.0f);
-
-        vao_bind(&b_vao);
-
-        glDrawElementsInstanced(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0, txt_buffer.length / TEXT_VEC4S_PER_GLYPH);
+        text_render(font_size);
 
         platform_swap_buffers();
+        db_arena_reset(&frame_arena);
     }
-    shader_destroy(&shader);
+    text_deinit();
     platform_shutdown();
 }
 
-void camera_set_matrix(camera *camera, shader *shader, f32 near_plane, f32 far_plane)
-{
-    u32 projection_loc = glGetUniformLocation(shader->program, "projection");
-    u32 model_loc      = glGetUniformLocation(shader->program, "model");
-    u32 view_loc       = glGetUniformLocation(shader->program, "view");
-
-    db_matrix4 ortho;
-    // the projection works in physical pixels, matching the buffer and font_px
-    db_matrix4_ortho2d(&ortho, 0, (f32)WINDOW_WIDTH * display_scale, (f32)WINDOW_HEIGHT * display_scale, 0);
-
-    db_matrix4 view;
-    db_matrix4_identity(&view);
-
-    db_matrix4 model;
-    db_matrix4_identity(&model);
-
-    glUniformMatrix4fv(view_loc, 1, GL_FALSE, view.data);
-    glUniformMatrix4fv(projection_loc, 1, GL_FALSE, ortho.data);
-    glUniformMatrix4fv(model_loc, 1, GL_FALSE, model.data);
-}
 //@note:
 // this is temperory
-b8 update(db_arena *main_arena)
+b8 update(db_arena *arena, f32 *font_size)
 {
     if (input_was_key_down(KEY_ESCAPE))
     {
         return false;
     }
+    if (input_is_key_down(KEY_D))
+    {
+        *font_size += 2.0f;
+    }
+    if (input_is_key_down(KEY_A))
+    {
+        *font_size -= 2.0f;
+    }
+    *font_size = db_max(4.0, *font_size);
     return true;
-}
-
-void render_text(db_string *string, f32 font_size)
-{
 }
