@@ -1,10 +1,13 @@
 #pragma once
-#include "core/db.h"
+#include "core/defines.h"
 
 b8   platform_startup(db_arena *arena, char *application_name, s32 x, s32 y, s32 width, s32 height);
-f32  platform_get_display_scale(); // physical pixels per logical unit. 1 where the platform doesn't report one
+b8   platform_renderer_init(db_arena *arena);
+void platform_renderer_shutdown(); // destroys the graphics context; call before platform_shutdown
 void platform_shutdown();
-b8   platform_pump_messages();
+
+f32 platform_get_display_scale(); // physical pixels per logical unit. 1 where the platform doesn't report one
+b8  platform_pump_messages();
 
 // void platform_log_message(const char *buffer, log_levels level, u32 max_chars);
 

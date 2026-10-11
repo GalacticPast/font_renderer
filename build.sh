@@ -82,7 +82,7 @@ case "$PLATFORM" in
             xkbcommon
         )
 
-        PLATFORM_DEFINE="-DDPLATFORM_LINUX_WAYLAND"
+        PLATFORM_DEFINE="-DDB_PLATFORM_LINUX_WAYLAND"
         ;;
 
     x11)
@@ -96,7 +96,7 @@ case "$PLATFORM" in
             xcb
         )
 
-        PLATFORM_DEFINE="-DDPLATFORM_LINUX_X11"
+        PLATFORM_DEFINE="-DDB_PLATFORM_LINUX_X11"
         ;;
 
     *)
@@ -222,7 +222,7 @@ COMPILER_FLAGS=(
 
     -fsanitize=undefined
 
-    -DDPLATFORM_LINUX
+    -DDB_PLATFORM_LINUX
     "$PLATFORM_DEFINE"
 )
 

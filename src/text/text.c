@@ -1,141 +1,42 @@
 #define STB_TRUETYPE_IMPLEMENTATION
 
 #include "text/text.h"
-#include "stb/stb_truetype.h"
 #include "core/db_math.h"
 #include "renderer/gl.h"
+#include "stb/stb_truetype.h"
 
 void text_compute_glyph_bbox(glyphs *g);
 
 typedef struct
 {
-    glyphs glyphs; // for now there's only one
+    glyphs           glyphs; // for now there's only one
+    db_array_vector4 frame_instance;
 } text_state;
 
 text_state *t_state;
 
-static f32 text_line_height()
+void text_init(db_arena *arena)
 {
-    return t_state->glyphs.ascent - t_state->glyphs.descent + t_state->glyphs.line_gap;
+    t_state = db_arena_alloc(arena, sizeof(text_state));
+    ASSERT(t_state);
+    __text_gl_init(arena);
+    t_state->frame_instance = db_array_vector4_init(arena);
 }
 
-// bytes outside ASCII (e.g. UTF-8 lead bytes, negative as signed char) fall back to '?'
-static glyph_data *text_get_glyph(char c)
+void text_deinit()
 {
-    u8 code = (u8)c;
-    if (code >= TEXT_GLYPH_COUNT)
-        code = '?';
-    return &t_state->glyphs.data[code];
-}
-
-static f32 text_next_tab_stop(f32 pen_x, f32 font_size)
-{
-    f32 tab = TEXT_TAB_WIDTH * t_state->glyphs.data[' '].advance * font_size;
-    return (db_floor(pen_x / tab) + 1.0f) * tab;
-}
-
-// no wrapping: only '\n' starts a new line
-db_vector2 text_calculate_size(const char *string, s_size length, f32 font_size)
-{
-    ASSERT_WITH_MSG(string, "String is empty");
-
-    f32 line_width = 0.0f;
-    f32 max_width  = 0.0f;
-    s32 line_count = 1;
-
-    for (s64 i = 0; i < (s64)length; i++)
-    {
-        char c = string[i];
-        if (c == '\n')
-        {
-            max_width  = db_max(max_width, line_width);
-            line_width = 0.0f;
-            line_count++;
-            continue;
-        }
-        if (c == '\t')
-        {
-            line_width = text_next_tab_stop(line_width, font_size);
-            continue;
-        }
-        if ((u8)c < ' ' || c == 127)
-            continue;
-
-        line_width += text_get_glyph(c)->advance * font_size;
-    }
-    max_width = db_max(max_width, line_width);
-
-    return db_vector2_make(max_width, line_count * text_line_height() * font_size);
-}
-
-void text_prepare_render_buffer(db_string *string, db_array_vector4 *buffer, f32 font_size, f32 wrap_width)
-{
-    db_vector2 pen_pos = db_vector2_make(0.0f, t_state->glyphs.ascent * font_size);
-    for (s32 i = 0; i < string->length; i++)
-    {
-        char c = string->data[i];
-        if (c == '\n')
-        {
-            pen_pos.x  = 0.0f;
-            pen_pos.y += text_line_height() * font_size;
-            continue;
-        }
-        if (c == '\t')
-        {
-            pen_pos.x = text_next_tab_stop(pen_pos.x, font_size);
-            continue;
-        }
-        // '\r' and every other control code: no glyph, no advance
-        if ((u8)c < ' ' || c == 127)
-            continue;
-
-        glyph_data *g = text_get_glyph(c);
-        if (pen_pos.x + g->advance * font_size > wrap_width)
-        {
-            pen_pos.x  = 0.0f;
-            pen_pos.y += text_line_height() * font_size;
-        }
-
-        // pen goes to em here, so only the pen is scaled. The matrix is already in em
-        db_vector4 v =
-            db_vector4_make(pen_pos.x / font_size, pen_pos.y / font_size, g->curves_indicies.x, g->curves_indicies.y);
-        db_vector4 fr_row = db_vector4_make(g->translation_matrix.data[0], g->translation_matrix.data[1],
-                                            g->translation_matrix.data[2], g->translation_matrix.data[3]);
-        db_vector4 s_row  = db_vector4_make(g->translation_matrix.data[4], g->translation_matrix.data[5],
-                                            g->translation_matrix.data[6], g->translation_matrix.data[7]);
-        db_vector4 t_row  = db_vector4_make(g->translation_matrix.data[8], g->translation_matrix.data[9],
-                                            g->translation_matrix.data[10], g->translation_matrix.data[11]);
-        db_vector4 fo_row = db_vector4_make(g->translation_matrix.data[12], g->translation_matrix.data[13],
-                                            g->translation_matrix.data[14], g->translation_matrix.data[15]);
-
-        db_array_vector4_append(buffer, v);
-        db_array_vector4_append(buffer, fr_row);
-        db_array_vector4_append(buffer, s_row);
-        db_array_vector4_append(buffer, t_row);
-        db_array_vector4_append(buffer, fo_row);
-
-        for (s32 j = 0; j < NUMBER_OF_BANDS * 2; j += 2)
-        {
-            db_vector4 bands_ind =
-                db_vector4_make(g->bands_loc[j].x, g->bands_loc[j].y, g->bands_loc[j + 1].x, g->bands_loc[j + 1].y);
-            db_array_vector4_append(buffer, bands_ind);
-        }
-
-        pen_pos.x += g->advance * font_size;
-    }
-    __text_update_gpu_buffer(buffer->data, buffer->length * buffer->type_size);
+    __text_gl_deinit();
 }
 
 glyphs *text_load_font(db_arena *arena, const char *file_path)
 {
+    ASSERT(t_state);
     db_file_contents font_content = db_file_read_contents(arena, db_file_mode_rb, 0, file_path);
     ASSERT_WITH_MSG(font_content.size, "couldnt read the font.");
 
     stbtt_fontinfo font_info = {};
     b8             res       = stbtt_InitFont(&font_info, font_content.data, 0);
     ASSERT_WITH_MSG(res, "font loeading failed");
-
-    t_state = db_arena_alloc(arena, sizeof(text_state));
 
     glyphs glyphs           = {};
     glyphs.curves           = db_array_curves_init(arena);
@@ -229,6 +130,132 @@ glyphs *text_load_font(db_arena *arena, const char *file_path)
     return &t_state->glyphs;
 }
 
+static f32 text_line_height()
+{
+    return t_state->glyphs.ascent - t_state->glyphs.descent + t_state->glyphs.line_gap;
+}
+
+// bytes outside ASCII (e.g. UTF-8 lead bytes, negative as signed char) fall back to '?'
+static glyph_data *text_get_glyph(char c)
+{
+    u8 code = (u8)c;
+    if (code >= TEXT_GLYPH_COUNT)
+        code = '?';
+    return &t_state->glyphs.data[code];
+}
+
+static f32 text_next_tab_stop(f32 pen_x, f32 font_size)
+{
+    f32 tab = TEXT_TAB_WIDTH * t_state->glyphs.data[' '].advance * font_size;
+    return (db_floor(pen_x / tab) + 1.0f) * tab;
+}
+
+// no wrapping: only '\n' starts a new line
+db_vector2 text_calculate_size(const char *string, s_size length, f32 font_size)
+{
+    ASSERT_WITH_MSG(string, "String is empty");
+
+    f32 line_width = 0.0f;
+    f32 max_width  = 0.0f;
+    s32 line_count = 1;
+
+    for (s64 i = 0; i < (s64)length; i++)
+    {
+        char c = string[i];
+        if (c == '\n')
+        {
+            max_width  = db_max(max_width, line_width);
+            line_width = 0.0f;
+            line_count++;
+            continue;
+        }
+        if (c == '\t')
+        {
+            line_width = text_next_tab_stop(line_width, font_size);
+            continue;
+        }
+        if ((u8)c < ' ' || c == 127)
+            continue;
+
+        line_width += text_get_glyph(c)->advance * font_size;
+    }
+    max_width = db_max(max_width, line_width);
+
+    return db_vector2_make(max_width, line_count * text_line_height() * font_size);
+}
+
+void text_push_string(db_string *string, db_vector2 *position, db_vector3 *color, f32 font_size, f32 wrap_width)
+{
+    db_vector2        pen_pos = db_vector2_make(position->x, position->y + (t_state->glyphs.ascent * font_size));
+    db_array_vector4 *buffer  = &t_state->frame_instance;
+
+    for (s32 i = 0; i < string->length; i++)
+    {
+        char c = string->data[i];
+        if (c == '\n')
+        {
+            pen_pos.x  = position->x;
+            pen_pos.y += text_line_height() * font_size;
+            continue;
+        }
+        if (c == '\t')
+        {
+            // tab stops are measured from the start of the string, not the window edge
+            pen_pos.x = position->x + text_next_tab_stop(pen_pos.x - position->x, font_size);
+            continue;
+        }
+        // '\r' and every other control code: no glyph, no advance
+        if ((u8)c < ' ' || c == 127)
+            continue;
+
+        glyph_data *g          = text_get_glyph(c);
+        f32         line_width = pen_pos.x - position->x;
+        if (wrap_width > 0.0f && line_width + g->advance * font_size > wrap_width)
+        {
+            pen_pos.x  = position->x;
+            pen_pos.y += text_line_height() * font_size;
+        }
+
+        // pen goes to em here, so only the pen is scaled. The matrix is already in em
+        db_vector4 v =
+            db_vector4_make(pen_pos.x / font_size, pen_pos.y / font_size, g->curves_indicies.x, g->curves_indicies.y);
+        db_vector4 col_n_font_size = db_vector4_make(color->x, color->y, color->z, font_size);
+        db_vector4 fr_row          = db_vector4_make(g->translation_matrix.data[0], g->translation_matrix.data[1],
+                                                     g->translation_matrix.data[2], g->translation_matrix.data[3]);
+        db_vector4 s_row           = db_vector4_make(g->translation_matrix.data[4], g->translation_matrix.data[5],
+                                                     g->translation_matrix.data[6], g->translation_matrix.data[7]);
+        db_vector4 t_row           = db_vector4_make(g->translation_matrix.data[8], g->translation_matrix.data[9],
+                                                     g->translation_matrix.data[10], g->translation_matrix.data[11]);
+        db_vector4 fo_row          = db_vector4_make(g->translation_matrix.data[12], g->translation_matrix.data[13],
+                                                     g->translation_matrix.data[14], g->translation_matrix.data[15]);
+
+        db_array_vector4_append(buffer, v);
+        db_array_vector4_append(buffer, col_n_font_size);
+        db_array_vector4_append(buffer, fr_row);
+        db_array_vector4_append(buffer, s_row);
+        db_array_vector4_append(buffer, t_row);
+        db_array_vector4_append(buffer, fo_row);
+
+        for (s32 j = 0; j < NUMBER_OF_BANDS * 2; j += 2)
+        {
+            db_vector4 bands_ind =
+                db_vector4_make(g->bands_loc[j].x, g->bands_loc[j].y, g->bands_loc[j + 1].x, g->bands_loc[j + 1].y);
+            db_array_vector4_append(buffer, bands_ind);
+        }
+
+        pen_pos.x += g->advance * font_size;
+    }
+}
+
+void text_flush(u32 physical_width, u32 physical_height)
+{
+    __text_update_gpu_buffer(t_state->frame_instance.data,
+                             t_state->frame_instance.length * t_state->frame_instance.type_size);
+    __text_render(physical_width, physical_height);
+    // should I reset the array?
+    t_state->frame_instance.length = 0;
+}
+
 static f32 solve_bezier(f32 a, f32 b, f32 c, f32 t)
 {
     // (1 - t)^2 a, + 2 * t * ( 1 - t) * b + t * t * c
@@ -236,7 +263,7 @@ static f32 solve_bezier(f32 a, f32 b, f32 c, f32 t)
     return ans;
 }
 
-b8 compare_s32(s32 *a, s32 *b)
+static b8 compare_s32(s32 *a, s32 *b)
 {
     return (*a > *b) - (*a < *b); // -1, 0, or 1
 }

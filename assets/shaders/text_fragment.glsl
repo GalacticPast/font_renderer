@@ -25,18 +25,18 @@ out vec4 FragColor;
 in vec2 frag_pos;
 
 flat in vec2 frag_curve_indicies;
-flat in mat4 frag_h_band_loc;
-flat in mat4 frag_v_band_loc;
 flat in vec2 frag_glyph_min;
 flat in vec2 frag_glyph_max;
-
-uniform float font_px;
+flat in mat4 frag_h_band_loc;
+flat in mat4 frag_v_band_loc;
+flat in vec3 frag_color;
+flat in float frag_font_px;
 
 // Paper Table 1: 16-bit lookup. For input code i, bit 2i is the t1 contribution and bit 2i+1 the t2 contribution.
 #define CONTRIBUTION_TABLE 0x2E74
 
 // Supersampling: samples per pixel along each axis (paper section 6). 1 disables it.
-#define SAMPLES_PER_AXIS 1
+#define SAMPLES_PER_AXIS 3
 
 // The paper's only tolerance: a near-zero quadratic term means the curve is a straight line.
 #define LINEAR_EPSILON 1e-6
@@ -66,7 +66,7 @@ float bezier_along_ray(float u0, float u1, float u2, float t)
 // distance_em is the crossing's distance from the pixel center along the ray.
 float crossing_fraction(float distance_em)
 {
-    return clamp(distance_em * font_px + 0.5, 0.0, 1.0);
+    return clamp(distance_em * frag_font_px + 0.5, 0.0, 1.0);
 }
 
 
@@ -166,7 +166,7 @@ void main()
     for (int s = 0; s < SAMPLES_PER_AXIS; s++)
     {
         float offset_px = (float(s) + 0.5) / float(SAMPLES_PER_AXIS) - 0.5;
-        float offset_em = offset_px / font_px;
+        float offset_em = offset_px / frag_font_px;
 
         float ray_y = frag_pos.y + offset_em;
         float ray_x = frag_pos.x + offset_em;
@@ -198,5 +198,6 @@ void main()
     if (alpha <= 0.0)
         discard;
 
-    FragColor = vec4(vec3(1.0), alpha);
+    vec3 color = frag_color ;
+    FragColor = vec4(color, alpha);
 }

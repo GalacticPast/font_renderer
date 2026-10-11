@@ -1,3 +1,5 @@
+#pragma once
+
 #include "core/db.h"
 
 // warning I copied this from ginger bill. So im sorry if you see this mista bill

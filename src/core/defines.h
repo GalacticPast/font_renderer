@@ -1,4 +1,5 @@
-#define DB_IMPLEMENTATION
+#pragma once
+
 #define DB_MATH_IMPLEMENTATION
 
 #include "core/db.h"

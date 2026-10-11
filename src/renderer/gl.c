@@ -99,6 +99,7 @@ void ssbo_unbind()
 }
 void ssbo_delete(SSBO *ssbo_object)
 {
+    glDeleteBuffers(1, &ssbo_object->id);
 }
 
 b8 shader_create(db_arena *arena, shader *shader, const char *vertex_path, const char *fragment_path)

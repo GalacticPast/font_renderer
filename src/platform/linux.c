@@ -22,7 +22,7 @@
 #include <unistd.h> // usleep
 #endif
 
-#ifdef DPLATFORM_LINUX_X11
+#ifdef DB_PLATFORM_LINUX_X11
 
 #include <X11/XKBlib.h>   // sudo apt-get install libx11-dev
 #include <X11/Xlib-xcb.h> // sudo apt-get install libxkbcommon-x11-dev
@@ -586,7 +586,7 @@ keys translate_keycode(u32 xk_keycode)
 
 #endif
 
-#ifdef DPLATFORM_LINUX_WAYLAND
+#ifdef DB_PLATFORM_LINUX_WAYLAND
 
 #define CHECK_WL_RESULT(expr)                                                                                          \
     {                                                                                                                  \
@@ -1018,6 +1018,24 @@ b8 platform_startup(db_arena *arena, char *application_name, s32 x, s32 y, s32 w
         wp_fractional_scale_v1_add_listener(state->wp_fractional_scale, &fractional_scale_listener, state);
     }
 
+    // state->zxdg_toplevel_decoration_v1 = zxdg_decoration_manager_v1_get_toplevel_decoration(
+    //     state->zxdg_decoration_manager_v1,
+    //     state->xdg_toplevel); // toplevel is from xdg_surface_get_toplevel
+    //
+    // zxdg_toplevel_decoration_v1_set_mode(state->zxdg_toplevel_decoration_v1,
+    //                                      ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
+
+    state->width  = width;
+    state->height = height;
+
+    return true;
+}
+
+b8 platform_renderer_init(db_arena *arena)
+{
+
+    platform_state *state = platform_state_ptr;
+
     state->egl_display = eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_KHR, state->wl_display, NULL);
     if (state->egl_display == EGL_NO_DISPLAY)
     {
@@ -1077,7 +1095,7 @@ b8 platform_startup(db_arena *arena, char *application_name, s32 x, s32 y, s32 w
     }
 
     // The scale is only known after the first frame, so the window starts at 1x and is resized below.
-    state->egl_window = wl_egl_window_create(state->wl_surface, width, height);
+    state->egl_window = wl_egl_window_create(state->wl_surface, state->width, state->height);
 
     if (!state->egl_window)
     {
@@ -1125,8 +1143,8 @@ b8 platform_startup(db_arena *arena, char *application_name, s32 x, s32 y, s32 w
     wl_display_roundtrip(state->wl_display);
     if (state->display_scale != 1.0f)
     {
-        wl_egl_window_resize(state->egl_window, (s32)(width * state->display_scale),
-                             (s32)(height * state->display_scale), 0, 0);
+        wl_egl_window_resize(state->egl_window, (s32)(state->width * state->display_scale),
+                             (s32)(state->height * state->display_scale), 0, 0);
     }
 
     if (!gladLoadGLLoader((GLADloadproc)eglGetProcAddress))
@@ -1138,18 +1156,25 @@ b8 platform_startup(db_arena *arena, char *application_name, s32 x, s32 y, s32 w
     printf("Opengl initialization sucessful.\n");
 
     wl_surface_commit(state->wl_surface);
-
-    // state->zxdg_toplevel_decoration_v1 = zxdg_decoration_manager_v1_get_toplevel_decoration(
-    //     state->zxdg_decoration_manager_v1,
-    //     state->xdg_toplevel); // toplevel is from xdg_surface_get_toplevel
-    //
-    // zxdg_toplevel_decoration_v1_set_mode(state->zxdg_toplevel_decoration_v1,
-    //                                      ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
-
-    state->width  = width;
-    state->height = height;
-
     return true;
+}
+
+// reverse order of platform_renderer_init: the context must stop being current before it is destroyed,
+// and the EGL surface must go before the wl_egl_window it was created from
+void platform_renderer_shutdown()
+{
+    platform_state *state = platform_state_ptr;
+
+    eglMakeCurrent(state->egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+    eglDestroyContext(state->egl_display, state->egl_context);
+    eglDestroySurface(state->egl_display, state->egl_surface);
+    wl_egl_window_destroy(state->egl_window);
+    eglTerminate(state->egl_display);
+
+    state->egl_context = EGL_NO_CONTEXT;
+    state->egl_surface = EGL_NO_SURFACE;
+    state->egl_window  = NULL;
+    state->egl_display = EGL_NO_DISPLAY;
 }
 
 void platform_swap_buffers()

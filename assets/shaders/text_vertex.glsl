@@ -26,26 +26,32 @@ layout (location = 0) in vec3 position;
 // instanced
 layout (location = 1) in vec2 pen_offset;
 layout (location = 2) in vec2 curve_indicies;
-layout (location = 3) in mat4 translation_matrix;
+layout (location = 3) in vec4 text_color; // r g b and then the last is the font size.  
+layout (location = 4) in mat4 translation_matrix;
 // bands_loc[0..7] (horizontal), two bands packed per column: col c holds bands b=2c (.xy) and b=2c+1 (.zw)
-layout (location = 7)  in mat4 h_band_loc;
+layout (location = 8)  in mat4 h_band_loc;
 // bands_loc[8..15] (vertical), same packing
-layout (location = 11) in mat4 v_band_loc;
+layout (location = 12) in mat4 v_band_loc;
 
 flat out vec2 frag_curve_indicies;
 flat out mat4 frag_h_band_loc;
 flat out mat4 frag_v_band_loc;
 flat out vec2 frag_glyph_min;
 flat out vec2 frag_glyph_max;
+flat out vec3 frag_color;
+flat out float frag_font_px;
 
-uniform float font_px; // pixels per em
 
 out vec2 frag_pos;
 
 void main()
 {
+    frag_color = text_color.rgb;
+    float font_px = text_color.a;
+    frag_font_px = font_px;
     // glyph space, in em: same units as the curves. Must not include pen_offset
     vec4 glyph_pos = (model * translation_matrix) * vec4(position, 1.0);
+
     // dilate the quad by half a pixel so edge pixels are shaded (the paper's bounding-box expansion)
     glyph_pos.xy += sign(position.xy) * (0.5 / font_px);
     frag_pos = glyph_pos.xy;

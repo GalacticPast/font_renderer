@@ -3,11 +3,12 @@
 // Include the full windows.h before db.h does, because db.h defines NOGDI/NOUSER and
 // windows.h's include guards would make a later #undef ineffective.
 #define WIN32_LEAN_AND_MEAN
+#include <wglext.h>
 #include <windows.h>
 #include <windowsx.h>
 
-#include "glad/glad.h"
 #include "core/input.h"
+#include "glad/glad.h"
 #include "platform/platform.h"
 
 static f64           clock_frequency;
@@ -29,8 +30,6 @@ static internal_state  storage;
 static internal_state *state = &storage;
 static b8              running;
 static b8              input_ready;
-
-static b8 init_openGL(void);
 
 // Clock
 
@@ -212,26 +211,35 @@ b8 platform_startup(db_arena *arena, char *application_name, s32 x, s32 y, s32 w
 
     // The window may have landed on a monitor whose DPI differs from the system DPI.
     state->display_scale = GetDpiForWindow(state->hwnd) / 96.0f;
+    running              = true;
 
-    if (!init_openGL())
-    {
-        platform_shutdown();
-        return false;
-    }
-    running = true;
     return true;
 }
+
 void platform_shutdown(void)
 {
-
     if (state->hwnd)
     {
-        wglMakeCurrent(NULL, NULL);
-        wglDeleteContext(state->opengl_context);
-        ReleaseDC(state->hwnd, state->hdc);
         DestroyWindow(state->hwnd);
-
         state->hwnd = 0;
+    }
+}
+
+// reverse order of platform_renderer_init: release the context, then the device context it was made on
+void platform_renderer_shutdown(void)
+{
+    opengl_initialized = false;
+
+    wglMakeCurrent(NULL, NULL);
+    if (state->opengl_context)
+    {
+        wglDeleteContext(state->opengl_context);
+        state->opengl_context = NULL;
+    }
+    if (state->hdc)
+    {
+        ReleaseDC(state->hwnd, state->hdc);
+        state->hdc = NULL;
     }
 }
 b8 platform_pump_messages(void)
@@ -249,7 +257,7 @@ b8 platform_pump_messages(void)
     return running;
 }
 
-static b8 init_openGL(void)
+b8 platform_renderer_init(db_arena *arena)
 {
     printf("Initializing OpenGL...\n");
 
@@ -294,7 +302,16 @@ static b8 init_openGL(void)
     typedef HGLRC(WINAPI * create_context_proc)(HDC, HGLRC, const int *);
     create_context_proc create_context = (create_context_proc)wglGetProcAddress("wglCreateContextAttribsARB");
     // WGL major version, minor version, profile mask, core profile bit.
-    const int attributes[]             = {0x2091, 3, 0x2092, 3, 0x9126, 1, 0};
+    const int attributes[]             = {
+        WGL_CONTEXT_MAJOR_VERSION_ARB,
+        4,
+        WGL_CONTEXT_MINOR_VERSION_ARB,
+        3,
+        WGL_CONTEXT_PROFILE_MASK_ARB,
+        WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
+        0 // Null terminator
+    };
+
     if (create_context)
         state->opengl_context = create_context(state->hdc, NULL, attributes);
 
@@ -302,7 +319,7 @@ static b8 init_openGL(void)
     {
         wglMakeCurrent(NULL, NULL);
         wglDeleteContext(temp_context);
-        MessageBox(NULL, ("OpenGL 3.3 core context unavailable"), "DERROR", MB_ICONERROR);
+        MessageBox(NULL, ("OpenGL 4.3 core context unavailable"), "DERROR", MB_ICONERROR);
         return false;
     }
 
@@ -312,7 +329,7 @@ static b8 init_openGL(void)
         return false;
 
     // Glad Loader!
-    if (!gladLoadGL() || !GLAD_GL_VERSION_3_3)
+    if (!gladLoadGL() || !GLAD_GL_VERSION_4_3)
     {
         MessageBox(NULL, ("Glad Loader failed!"), "DERROR", MB_ICONERROR);
         return false;

@@ -1,3 +1,5 @@
+#pragma once
+
 #include "core/defines.h"
 
 typedef struct
@@ -40,16 +42,22 @@ typedef struct
 } glyphs;
 
 // vec4s written per glyph by text_prepare_render_buffer: pen + curve range, then the 4 matrix columns
-#define TEXT_VEC4S_PER_GLYPH 13
+#define TEXT_VEC4S_PER_GLYPH 14
 
-void       text_init(db_arena *arena);
-void       text_deinit();
+void text_init(db_arena *arena);
+void text_deinit();
+
 glyphs    *text_load_font(db_arena *arena, const char *file_path);
-void       text_prepare_render_buffer(db_string *string, db_array_vector4 *buffer, f32 font_size, f32 wrap_width);
 db_vector2 text_calculate_size(const char *string, s_size length, f32 font_size);
 
-void text_render(f32 font_size);
+// wrap_width is measured from position.x; 0 disables wrapping
+// missing support for multiple font_sizes in the text itself.
+void text_push_string(db_string *string, db_vector2 *position, db_vector3 *color, f32 font_size, f32 wrap_width);
+void text_flush(u32 physical_width, u32 physical_height);
 
 // internal
 void __text_upload_to_gpu(glyphs *g);
 void __text_update_gpu_buffer(void *data, s_size size);
+void __text_gl_deinit();
+void __text_gl_init(db_arena *arena);
+void __text_render(u32 physical_width, u32 physical_height);

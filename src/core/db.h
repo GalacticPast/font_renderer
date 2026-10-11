@@ -32,7 +32,10 @@
 
 #elif __linux__
 
+#ifndef DB_PLATFORM_LINUX
 #define DB_PLATFORM_LINUX
+#endif
+
 #include <fcntl.h>
 #include <sanitizer/asan_interface.h>
 #include <sys/mman.h>

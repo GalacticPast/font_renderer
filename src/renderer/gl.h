@@ -1,5 +1,7 @@
+#pragma once
+
+#include "core/defines.h"
 #include "glad/glad.h"
-#include "core/db.h"
 
 typedef struct shader
 {

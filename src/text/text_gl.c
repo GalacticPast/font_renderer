@@ -1,4 +1,3 @@
-#include "platform/platform.h"
 #include "renderer/gl.h"
 #include "text/text.h"
 
@@ -41,7 +40,7 @@ u32 indices[] =
 };
 // clang-format on
 
-void text_init(db_arena *arena)
+void __text_gl_init(db_arena *arena)
 {
     t_gl_state = db_arena_alloc(arena, sizeof(text_gl_state));
     ASSERT(t_gl_state);
@@ -68,29 +67,25 @@ void text_init(db_arena *arena)
 
     vbo_create_dynamic(instanced_vbo, MAX_GLYPHS * TEXT_VEC4S_PER_GLYPH * sizeof(db_vector4));
 
-    s_size stride = 18 * sizeof(db_vector2) + 4 * sizeof(db_vector4);
+    s_size stride = 2 * sizeof(db_vector2) + 13 * sizeof(db_vector4);
+
     vao_link_vbo_attribs(b_vao, instanced_vbo, 1, 2, GL_FLOAT, stride, (void *)0);
     vao_link_vbo_attribs(b_vao, instanced_vbo, 2, 2, GL_FLOAT, stride, (void *)(2 * sizeof(f32)));
 
-    // mat4 takes locations 3..6, one vec4 column each
+    // mat4 takes locations 4..6, one vec4 column each
     vao_link_vbo_attribs(b_vao, instanced_vbo, 3, 4, GL_FLOAT, stride, (void *)(4 * sizeof(f32)));
-    vao_link_vbo_attribs(b_vao, instanced_vbo, 4, 4, GL_FLOAT, stride, (void *)(8 * sizeof(f32)));
-    vao_link_vbo_attribs(b_vao, instanced_vbo, 5, 4, GL_FLOAT, stride, (void *)(12 * sizeof(f32)));
-    vao_link_vbo_attribs(b_vao, instanced_vbo, 6, 4, GL_FLOAT, stride, (void *)(16 * sizeof(f32)));
 
-    // h_band_loc mat4 takes locations 7..10, packing bands_loc[0..7] (horizontal) two bands per column
-    vao_link_vbo_attribs(b_vao, instanced_vbo, 7, 4, GL_FLOAT, stride, (void *)(20 * sizeof(f32)));
-    vao_link_vbo_attribs(b_vao, instanced_vbo, 8, 4, GL_FLOAT, stride, (void *)(24 * sizeof(f32)));
-    vao_link_vbo_attribs(b_vao, instanced_vbo, 9, 4, GL_FLOAT, stride, (void *)(28 * sizeof(f32)));
-    vao_link_vbo_attribs(b_vao, instanced_vbo, 10, 4, GL_FLOAT, stride, (void *)(32 * sizeof(f32)));
+    s_size offset                = 8 * sizeof(f32);
+    s32    first_matrix_location = 4;
+    s32    matrix_column_count   = 12;
 
-    // v_band_loc mat4 takes locations 11..14, packing bands_loc[8..15] (vertical) two bands per column
-    vao_link_vbo_attribs(b_vao, instanced_vbo, 11, 4, GL_FLOAT, stride, (void *)(36 * sizeof(f32)));
-    vao_link_vbo_attribs(b_vao, instanced_vbo, 12, 4, GL_FLOAT, stride, (void *)(40 * sizeof(f32)));
-    vao_link_vbo_attribs(b_vao, instanced_vbo, 13, 4, GL_FLOAT, stride, (void *)(44 * sizeof(f32)));
-    vao_link_vbo_attribs(b_vao, instanced_vbo, 14, 4, GL_FLOAT, stride, (void *)(48 * sizeof(f32)));
-
-    for (int i = 1; i <= 14; i++)
+    for (s32 i = 0; i < matrix_column_count; i++)
+    {
+        vao_link_vbo_attribs(b_vao, instanced_vbo, first_matrix_location + i, 4, GL_FLOAT, stride,
+                             (void *)(offset + i * sizeof(db_vector4)));
+    }
+    // every instanced attribute: 1 .. 15
+    for (s32 i = 1; i < first_matrix_location + matrix_column_count; i++)
     {
         glVertexAttribDivisor(i, 1);
     }
@@ -99,8 +94,18 @@ void text_init(db_arena *arena)
     ebo_bind(b_ebo);
 }
 
-void text_deinit()
+// needs the GL context, so it runs before renderer_shutdown
+void __text_gl_deinit()
 {
+    ssbo_delete(&t_gl_state->curves_ssbo);
+    ssbo_delete(&t_gl_state->horizontal_bands_ssbo);
+    ssbo_delete(&t_gl_state->vertical_bands_ssbo);
+
+    vbo_delete(&t_gl_state->instanced_vbo);
+    vbo_delete(&t_gl_state->b_vbo);
+    ebo_delete(&t_gl_state->b_ebo);
+    vao_delete(&t_gl_state->b_vao);
+
     shader_destroy(&t_gl_state->shader);
 }
 
@@ -125,15 +130,11 @@ void __text_update_gpu_buffer(void *data, s_size size)
     vbo_update(&t_gl_state->instanced_vbo, data, size);
 }
 
-void __text_set_shader_uniforms(shader *shader)
+void __text_set_shader_uniforms(shader *shader, u32 physical_width, u32 physical_height)
 {
-    u32 width, height;
-    platform_get_window_dimensions(&width, &height);
-    f32 display_scale = platform_get_display_scale();
-
     db_matrix4 ortho;
     // the projection works in physical pixels, matching the buffer and font_px
-    db_matrix4_ortho2d(&ortho, 0, width * display_scale, height * display_scale, 0);
+    db_matrix4_ortho2d(&ortho, 0, (f32)physical_width, (f32)physical_height, 0);
 
     db_matrix4 view;
     db_matrix4_identity(&view);
@@ -146,15 +147,13 @@ void __text_set_shader_uniforms(shader *shader)
     glUniformMatrix4fv(t_gl_state->model_loc, 1, GL_FALSE, model.data);
 }
 
-void text_render(f32 font_size)
+void __text_render(u32 physical_width, u32 physical_height)
 {
     shader *shader = &t_gl_state->shader;
 
     shader_use(shader);
-    // this is kinda terrible fuuuu
-    glUniform1f(glGetUniformLocation(shader->program, "font_px"), font_size);
 
-    __text_set_shader_uniforms(shader);
+    __text_set_shader_uniforms(shader, physical_width, physical_height);
 
     vao_bind(&t_gl_state->b_vao);
 
