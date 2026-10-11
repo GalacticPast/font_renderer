@@ -34,5 +34,5 @@ for /r "%SRC%" %%F in (*.c) do (
 set "SRC_FILES=!SRC_FILES! "vendor\glad\glad.c""
 
 echo Building %ASSEMBLY%%EXTENSION%...
-%CC% !SRC_FILES! %COMPILER_FLAGS% -o "%BIN%\%ASSEMBLY%%EXTENSION%" %INCLUDES% %LINKER_FLAGS%
+%CC% !SRC_FILES! %COMPILER_FLAGS% %DEFINES% -o "%BIN%\%ASSEMBLY%%EXTENSION%" %INCLUDES% %LINKER_FLAGS%
 exit /b %errorlevel%

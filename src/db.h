@@ -16,7 +16,10 @@
 
 #if defined(__win32_) || defined(__WIN32) || defined(_WIN32)
 
+#ifndef DB_PLATFORM_WINDOWS
 #define DB_PLATFORM_WINDOWS
+#endif
+
 #define NOGDI
 #define NOUSER
 #define WIN32_LEAN_AND_MEAN

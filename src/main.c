@@ -118,11 +118,11 @@ b8 update(db_arena *arena, f32 *font_size)
     {
         return false;
     }
-    if (input_is_key_down(KEY_D))
+    if (input_is_key_down(KEY_D) && input_was_key_up(KEY_D))
     {
         *font_size += 2.0f;
     }
-    if (input_is_key_down(KEY_A))
+    if (input_is_key_down(KEY_A) && input_was_key_up(KEY_A))
     {
         *font_size -= 2.0f;
     }
