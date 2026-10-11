@@ -2,7 +2,7 @@
 #include "platform/platform.h"
 
 // Linux platform layer.
-#ifdef DPLATFORM_LINUX
+#ifdef DB_PLATFORM_LINUX
 
 #include "glad/glad.h"
 #include <EGL/egl.h>
