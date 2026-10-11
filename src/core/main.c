@@ -1,7 +1,7 @@
-#include "gl.h"
-#include "input.h"
+#include "core/input.h"
 #include "platform/platform.h"
-#include "text.h"
+#include "renderer/gl.h"
+#include "text/text.h"
 
 #define ONE_TWENTIETH 0.05f
 
@@ -67,8 +67,6 @@ int main()
     glyphs *glyphs = text_load_font(&main_arena, "../assets/font/Archivo-Regular.ttf");
 
     f32 font_size = 24.0f * display_scale; // 12 logical px, in physical pixels
-
-    // for now render A
 
     vao_unbind();
 

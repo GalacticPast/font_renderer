@@ -1,6 +1,6 @@
-#include "gl.h"
 #include "platform/platform.h"
-#include "text.h"
+#include "renderer/gl.h"
+#include "text/text.h"
 
 typedef struct
 {

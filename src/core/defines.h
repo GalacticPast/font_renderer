@@ -1,8 +1,8 @@
 #define DB_IMPLEMENTATION
 #define DB_MATH_IMPLEMENTATION
 
-#include "db.h"
-#include "db_math.h"
+#include "core/db.h"
+#include "core/db_math.h"
 
 db_array_decl(vector2, db_vector2);
 db_array_decl(vector4, db_vector4);

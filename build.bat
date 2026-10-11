@@ -8,7 +8,7 @@ set CC=clang
 set ASSEMBLY=slug
 set EXTENSION=.exe
 
-set INCLUDES=-Ivendor/glad -Ivendor
+set INCLUDES=-Isrc -Ivendor/glad -Ivendor
 rem If raylib, uncomment the following line:
 rem set LINKER_FLAGS=-L./external/raylib/lib/windows/ -lraylib -lkernel32 -lgdi32 -luser32 -ladvapi32 -ltdh -lwinmm -lm
 set DEFINES=-DDB_PLATFORM_WINDOWS

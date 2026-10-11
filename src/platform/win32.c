@@ -3,9 +3,9 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <windowsx.h>
-#include "../../vendor/glad/glad.h"
-#include "../input.h"
-#include "platform.h"
+#include "glad/glad.h"
+#include "core/input.h"
+#include "platform/platform.h"
 static f64 clock_frequency;
 static LARGE_INTEGER start_time;
 

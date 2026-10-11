@@ -1,11 +1,11 @@
-#include "db.h"
+#include "core/db.h"
 
-// warining I copied this from ginger bill. So im sorry if you see this mista bill
+// warning I copied this from ginger bill. So im sorry if you see this mista bill
 
 #ifndef DB_MATH_INCLUDE_DB_MATH_H
 #define DB_MATH_INCLUDE_DB_MATH_H
 
-#include "db.h"
+#include "core/db.h"
 #include <stddef.h>
 
 #if !defined(DB_MATH_NO_MATH_H)

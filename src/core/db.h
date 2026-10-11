@@ -1,3 +1,8 @@
+// inspo :
+// @note: thanks ginger bill :) he is the inspiration for this whole single header file
+//  https://github.com/gingerBill/gb/blob/master/gb.h
+// https://iafisher.com/blog/2020/06/type-safe-generics-in-c
+
 #pragma once
 
 // asci art font : rubi_font https://patorjk.com/software/taag

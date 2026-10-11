@@ -1,4 +1,4 @@
-#include "input.h"
+#include "core/input.h"
 
 typedef struct keyboard_state
 {

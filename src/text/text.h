@@ -1,4 +1,4 @@
-#include "defines.h"
+#include "core/defines.h"
 
 typedef struct
 {
@@ -47,7 +47,8 @@ void       text_deinit();
 glyphs    *text_load_font(db_arena *arena, const char *file_path);
 void       text_prepare_render_buffer(db_string *string, db_array_vector4 *buffer, f32 font_size, f32 wrap_width);
 db_vector2 text_calculate_size(const char *string, s_size length, f32 font_size);
-void       text_render(f32 font_size);
+
+void text_render(f32 font_size);
 
 // internal
 void __text_upload_to_gpu(glyphs *g);

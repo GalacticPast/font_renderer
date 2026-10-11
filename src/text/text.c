@@ -1,9 +1,9 @@
 #define STB_TRUETYPE_IMPLEMENTATION
 
-#include "text.h"
-#include "../vendor/stb/stb_truetype.h"
-#include "db_math.h"
-#include "gl.h"
+#include "text/text.h"
+#include "stb/stb_truetype.h"
+#include "core/db_math.h"
+#include "renderer/gl.h"
 
 void text_compute_glyph_bbox(glyphs *g);
 

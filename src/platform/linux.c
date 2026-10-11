@@ -1,10 +1,10 @@
-#include "../input.h"
-#include "platform.h"
+#include "core/input.h"
+#include "platform/platform.h"
 
 // Linux platform layer.
 #ifdef DPLATFORM_LINUX
 
-#include "../../vendor/glad/glad.h"
+#include "glad/glad.h"
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 //
@@ -593,13 +593,13 @@ keys translate_keycode(u32 xk_keycode)
         ASSERT(expr != 0);                                                                                             \
     }
 //
-#include "../platform/wayland/fractional-scale-v1-client-protocol.h"
-#include "../platform/wayland/viewporter-client-protocol.h"
-#include "../platform/wayland/xdg-decoration-unstable-v1.h"
-#include "../platform/wayland/xdg-shell-client-protocol.h"
+#include "platform/wayland/fractional-scale-v1-client-protocol.h"
+#include "platform/wayland/viewporter-client-protocol.h"
+#include "platform/wayland/xdg-decoration-unstable-v1.h"
+#include "platform/wayland/xdg-shell-client-protocol.h"
 
-#include "../../vendor/xkbcommon/xkbcommon-keysyms.h"
-#include "../../vendor/xkbcommon/xkbcommon.h"
+#include "xkbcommon/xkbcommon-keysyms.h"
+#include "xkbcommon/xkbcommon.h"
 
 #include <wayland-egl.h>
 

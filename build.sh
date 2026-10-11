@@ -227,6 +227,7 @@ COMPILER_FLAGS=(
 )
 
 INCLUDES=(
+    -I"$ROOT/src"
     -I"$ROOT/vendor/glad"
     -I"$ROOT/vendor"
 )

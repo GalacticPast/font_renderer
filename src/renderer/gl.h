@@ -1,5 +1,5 @@
-#include "../vendor/glad/glad.h"
-#include "db.h"
+#include "glad/glad.h"
+#include "core/db.h"
 
 typedef struct shader
 {
