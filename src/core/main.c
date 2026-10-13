@@ -64,10 +64,7 @@ int main()
 
         renderer_start_frame(&frame_arena);
         // wrap at the window's right edge
-        renderer_batch()
-        {
-            renderer_push_text(&str, &pos, &color, 24.0f, (f32)width - pos.x);
-        }
+        renderer_push_text(&str, &pos, &color, 24.0f, (f32)width - pos.x);
 
         renderer_end_frame();
         db_arena_reset(&frame_arena);

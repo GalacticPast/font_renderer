@@ -36,7 +36,7 @@ flat in float frag_font_px;
 #define CONTRIBUTION_TABLE 0x2E74
 
 // Supersampling: samples per pixel along each axis (paper section 6). 1 disables it.
-#define SAMPLES_PER_AXIS 3
+#define SAMPLES_PER_AXIS 1
 
 // The paper's only tolerance: a near-zero quadratic term means the curve is a straight line.
 #define LINEAR_EPSILON 1e-6
@@ -52,6 +52,13 @@ vec2 band_range(mat4 packed_bands, int b)
     return (b % 2 == 0) ? col.xy : col.zw;
 }
 
+// Which band a ray at `position` falls in: the same NUMBER_OF_BANDS equal slices the CPU-side band build used.
+int band_index(float position, float box_min, float box_max)
+{
+    float band_size = max(box_max - box_min, LINEAR_EPSILON) / float(NUMBER_OF_BANDS);
+    return clamp(int((position - box_min) / band_size), 0, NUMBER_OF_BANDS - 1);
+}
+
 
 // Evaluate B(t) along the ray's axis: (1-t)^2 p0 + 2t(1-t) p1 + t^2 p2
 float bezier_along_ray(float u0, float u1, float u2, float t)
@@ -63,20 +70,30 @@ float bezier_along_ray(float u0, float u1, float u2, float t)
 
 
 // Paper Eq. (3): fraction of the pixel on the near side of a crossing.
-// distance_em is the crossing's distance from the pixel center along the ray.
-float crossing_fraction(float distance_em)
+// distance_px is the crossing's distance from the pixel center along the ray.
+float crossing_fraction(float distance_px)
 {
-    return clamp(distance_em * frag_font_px + 0.5, 0.0, 1.0);
+    return clamp(distance_px + 0.5, 0.0, 1.0);
+}
+
+// How much a ray's coverage can be trusted, from one of its crossings: 1 when the crossing is at the
+// pixel center, 0 once it is half a pixel or more away. An edge running along the ray is never crossed
+// near the pixel, and that ray only sees a hard 0/1 step there.
+float crossing_weight(float distance_px)
+{
+    return clamp(1.0 - 2.0 * abs(distance_px), 0.0, 1.0);
 }
 
 
 // One curve against one ray that points in +u. v is the offset across the ray, so the ray is v = 0.
 // pixel_u is the sample position along the ray.
-// Returns the signed contribution of this curve to the winding number.
+// Returns the signed contribution of this curve to the winding number, and raises weight to the
+// crossing_weight of its crossings.
 float ray_contribution(
     float u0, float u1, float u2,
     float v0, float v1, float v2,
-    float pixel_u)
+    float pixel_u,
+    inout float weight)
 {
     // Paper Eq. (2): input code, one bit per control point above the ray.
     int input_code = (v0 > 0.0 ? 2 : 0)
@@ -112,14 +129,18 @@ float ray_contribution(
 
     float contribution = 0.0;
 
-    if ((output_code & 1) != 0 && t1 >= 0.0 && t1 < 1.0)
+    if ((output_code & 1) != 0)
     {
-        contribution += crossing_fraction(bezier_along_ray(u0, u1, u2, t1) - pixel_u);
+        float distance_px = (bezier_along_ray(u0, u1, u2, t1) - pixel_u) * frag_font_px;
+        contribution += crossing_fraction(distance_px);
+        weight = max(weight, crossing_weight(distance_px));
     }
 
-    if ((output_code & 2) != 0 && t2 >= 0.0 && t2 < 1.0)
+    if ((output_code & 2) != 0)
     {
-        contribution -= crossing_fraction(bezier_along_ray(u0, u1, u2, t2) - pixel_u);
+        float distance_px = (bezier_along_ray(u0, u1, u2, t2) - pixel_u) * frag_font_px;
+        contribution -= crossing_fraction(distance_px);
+        weight = max(weight, crossing_weight(distance_px));
     }
 
     return contribution;
@@ -127,40 +148,46 @@ float ray_contribution(
 
 
 // Horizontal ray at height ray_y, pointing in +x.
-float horizontal_contribution(Curve curve, float ray_y, float pixel_x)
+float horizontal_contribution(Curve curve, float ray_y, float pixel_x, inout float weight)
 {
     return ray_contribution(
         curve.p0.x, curve.p1.x, curve.p2.x,
         curve.p0.y - ray_y, curve.p1.y - ray_y, curve.p2.y - ray_y,
-        pixel_x);
+        pixel_x, weight);
 }
 
 
 // Vertical ray at x = ray_x, pointing in +y.
 // Uses the rotation (u, v) = (y, -x), so the sign convention matches the horizontal ray.
-float vertical_contribution(Curve curve, float ray_x, float pixel_y)
+float vertical_contribution(Curve curve, float ray_x, float pixel_y, inout float weight)
 {
     return ray_contribution(
         curve.p0.y, curve.p1.y, curve.p2.y,
         ray_x - curve.p0.x, ray_x - curve.p1.x, ray_x - curve.p2.x,
-        pixel_y);
+        pixel_y, weight);
+}
+
+
+// Horizontal and vertical rays are two estimates of the same coverage, but each only gives a smooth
+// ramp across edges it crosses near the pixel. Weight each by how close its nearest crossing is.
+// Far from every edge both weights are 0 and both coverages are whole numbers, so fall back to the smaller.
+float combine_rays(float horizontal_coverage, float horizontal_weight,
+                   float vertical_coverage, float vertical_weight)
+{
+    // nonzero fill: overlapping contours can wind past 1
+    float horizontal = min(abs(horizontal_coverage), 1.0);
+    float vertical   = min(abs(vertical_coverage), 1.0);
+
+    float weighted = (horizontal * horizontal_weight + vertical * vertical_weight) /
+                     max(horizontal_weight + vertical_weight, LINEAR_EPSILON);
+
+    return max(weighted, min(horizontal, vertical));
 }
 
 
 void main()
 {
-    float horizontal_sum = 0.0;
-    float vertical_sum   = 0.0;
-
-    // Which band this fragment falls in, per axis (same bucketing math the CPU-side band build used).
-    float h_band_height = max(frag_glyph_max.y - frag_glyph_min.y, LINEAR_EPSILON) / float(NUMBER_OF_BANDS);
-    int   h_band        = clamp(int((frag_pos.y - frag_glyph_min.y) / h_band_height), 0, NUMBER_OF_BANDS - 1);
-    vec2  h_range        = band_range(frag_h_band_loc, h_band);
-
-    float v_band_height = max(frag_glyph_max.x - frag_glyph_min.x, LINEAR_EPSILON) / float(NUMBER_OF_BANDS);
-    int   v_band        = clamp(int((frag_pos.x - frag_glyph_min.x) / v_band_height), 0, NUMBER_OF_BANDS - 1);
-    vec2  v_range        = band_range(frag_v_band_loc, v_band);
-    
+    float coverage_sum = 0.0;
 
     // Sample positions sit on a line across the pixel: horizontal rays shift in y, vertical rays shift in x.
     for (int s = 0; s < SAMPLES_PER_AXIS; s++)
@@ -171,29 +198,30 @@ void main()
         float ray_y = frag_pos.y + offset_em;
         float ray_x = frag_pos.x + offset_em;
 
+        // the band comes from the ray, not the pixel center: an offset ray can sit in the neighboring band
+        vec2 h_range = band_range(frag_h_band_loc, band_index(ray_y, frag_glyph_min.y, frag_glyph_max.y));
+        vec2 v_range = band_range(frag_v_band_loc, band_index(ray_x, frag_glyph_min.x, frag_glyph_max.x));
+
+        float horizontal_coverage = 0.0;
+        float horizontal_weight   = 0.0;
         for (int k = int(h_range.x); k < int(h_range.y); ++k)
         {
             Curve curve = curves[horizontal_bands[k]];
-            horizontal_sum += horizontal_contribution(curve, ray_y, frag_pos.x);
+            horizontal_coverage += horizontal_contribution(curve, ray_y, frag_pos.x, horizontal_weight);
         }
 
+        float vertical_coverage = 0.0;
+        float vertical_weight   = 0.0;
         for (int k = int(v_range.x); k < int(v_range.y); ++k)
         {
             Curve curve = curves[vertical_bands[k]];
-            vertical_sum += vertical_contribution(curve, ray_x, frag_pos.y);
+            vertical_coverage += vertical_contribution(curve, ray_x, frag_pos.y, vertical_weight);
         }
+
+        coverage_sum += combine_rays(horizontal_coverage, horizontal_weight, vertical_coverage, vertical_weight);
     }
 
-    // Horizontal and vertical rays are two estimates of the same coverage.
-    float coverage =
-        0.5 *
-        (
-            horizontal_sum +
-            vertical_sum
-        ) / float(SAMPLES_PER_AXIS);
-
-    float alpha =
-        clamp(abs(coverage), 0.0, 1.0);
+    float alpha = clamp(coverage_sum / float(SAMPLES_PER_AXIS), 0.0, 1.0);
 
     if (alpha <= 0.0)
         discard;
