@@ -65,26 +65,26 @@ void __text_gl_init(db_arena *arena)
     vbo_create(b_vbo, vertices, sizeof(vertices));
     vao_link_vbo_attribs(b_vao, b_vbo, 0, 3, GL_FLOAT, 3 * sizeof(f32), (void *)0);
 
-    vbo_create_dynamic(instanced_vbo, MAX_GLYPHS * TEXT_VEC4S_PER_GLYPH * sizeof(db_vector4));
+    vbo_create_dynamic(instanced_vbo, MAX_GLYPHS * sizeof(glyph_instance));
 
-    s_size stride = 2 * sizeof(db_vector2) + 13 * sizeof(db_vector4);
+    s_size stride = sizeof(glyph_instance);
 
-    vao_link_vbo_attribs(b_vao, instanced_vbo, 1, 2, GL_FLOAT, stride, (void *)0);
-    vao_link_vbo_attribs(b_vao, instanced_vbo, 2, 2, GL_FLOAT, stride, (void *)(2 * sizeof(f32)));
-
-    // mat4 takes locations 4..6, one vec4 column each
-    vao_link_vbo_attribs(b_vao, instanced_vbo, 3, 4, GL_FLOAT, stride, (void *)(4 * sizeof(f32)));
-
-    s_size offset                = 8 * sizeof(f32);
-    s32    first_matrix_location = 4;
-    s32    matrix_column_count   = 12;
-
-    for (s32 i = 0; i < matrix_column_count; i++)
+    vao_link_vbo_attribs(b_vao, instanced_vbo, 1, 2, GL_FLOAT, stride, (void *)offsetof(glyph_instance, pen_offset));
+    vao_link_vbo_attribs(b_vao, instanced_vbo, 2, 2, GL_FLOAT, stride, (void *)offsetof(glyph_instance, curve_indices));
+    vao_link_vbo_attribs(b_vao, instanced_vbo, 3, 4, GL_FLOAT, stride,
+                         (void *)offsetof(glyph_instance, color_and_font_px));
+    for (s32 i = 0; i < 4; i++)
     {
-        vao_link_vbo_attribs(b_vao, instanced_vbo, first_matrix_location + i, 4, GL_FLOAT, stride,
-                             (void *)(offset + i * sizeof(db_vector4)));
+        vao_link_vbo_attribs(b_vao, instanced_vbo, 4 + i, 4, GL_FLOAT, stride,
+                             (void *)(offsetof(glyph_instance, translation_matrix) + i * sizeof(db_vector4)));
+        vao_link_vbo_attribs(b_vao, instanced_vbo, 8 + i, 4, GL_FLOAT, stride,
+                             (void *)(offsetof(glyph_instance, horizontal_band_locations) + i * sizeof(db_vector4)));
+        vao_link_vbo_attribs(b_vao, instanced_vbo, 12 + i, 4, GL_FLOAT, stride,
+                             (void *)(offsetof(glyph_instance, vertical_band_locations) + i * sizeof(db_vector4)));
     }
-    // every instanced attribute: 1 .. 15
+
+    s32 first_matrix_location = 4;
+    s32 matrix_column_count   = 12;
     for (s32 i = 1; i < first_matrix_location + matrix_column_count; i++)
     {
         glVertexAttribDivisor(i, 1);
@@ -124,8 +124,7 @@ void __text_upload_to_gpu(glyphs *g)
 
 void __text_update_gpu_buffer(void *data, s_size size)
 {
-    ASSERT_WITH_MSG(size <= MAX_GLYPHS * TEXT_VEC4S_PER_GLYPH * sizeof(db_vector4),
-                    "Insufficient size on the gpu to hold glyph data");
+    ASSERT_WITH_MSG(size <= MAX_GLYPHS * sizeof(glyph_instance), "Insufficient size on the gpu to hold glyph data");
     t_gl_state->frame_data_size = size;
     vbo_update(&t_gl_state->instanced_vbo, data, size);
 }
@@ -157,6 +156,5 @@ void __text_render(u32 physical_width, u32 physical_height)
 
     vao_bind(&t_gl_state->b_vao);
 
-    glDrawElementsInstanced(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0,
-                            t_gl_state->frame_data_size / (TEXT_VEC4S_PER_GLYPH * sizeof(db_vector4)));
+    glDrawElementsInstanced(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0, t_gl_state->frame_data_size / sizeof(glyph_instance));
 }

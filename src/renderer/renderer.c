@@ -3,6 +3,7 @@
 #include "platform/platform.h"
 #include "text/text.h"
 
+#define MAX_RENDER_BATCHES 12
 typedef struct
 {
     // logical, as the compositor lays the window out
@@ -13,13 +14,15 @@ typedef struct
     u32 physical_width;
     u32 physical_height;
 
+    // resets every frame
+    u64             batch_count;
+    db_render_batch batches[MAX_RENDER_BATCHES];
 } renderer_state;
 
 static renderer_state *r_state;
 
 b8 renderer_init(db_arena *arena)
 {
-
     r_state = db_arena_alloc(arena, sizeof(renderer_state));
     ASSERT(r_state);
     b8 success = platform_renderer_init(arena);
@@ -49,6 +52,16 @@ void renderer_start_frame(db_arena *arena)
     r_state->physical_height = (u32)(r_state->height * r_state->display_scale);
     glViewport(0, 0, (s32)r_state->physical_width, (s32)r_state->physical_height);
 }
+
+b8 renderer_start_layer()
+{
+
+    return true;
+}
+void renderer_end_layer()
+{
+}
+
 void renderer_push_quad(db_rect2 *quad, db_vector4 *color)
 {
 }

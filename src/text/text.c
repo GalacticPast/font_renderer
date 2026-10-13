@@ -9,8 +9,9 @@ void text_compute_glyph_bbox(glyphs *g);
 
 typedef struct
 {
-    glyphs           glyphs; // for now there's only one
-    db_array_vector4 frame_instance;
+    glyphs glyphs; // for now there's only one
+
+    db_array_glyph_instances instances;
 } text_state;
 
 text_state *t_state;
@@ -20,7 +21,7 @@ void text_init(db_arena *arena)
     t_state = db_arena_alloc(arena, sizeof(text_state));
     ASSERT(t_state);
     __text_gl_init(arena);
-    t_state->frame_instance = db_array_vector4_init(arena);
+    t_state->instances = db_array_glyph_instances_init(arena);
 }
 
 void text_deinit()
@@ -186,8 +187,8 @@ db_vector2 text_calculate_size(const char *string, s_size length, f32 font_size)
 
 void text_push_string(db_string *string, db_vector2 *position, db_vector3 *color, f32 font_size, f32 wrap_width)
 {
-    db_vector2        pen_pos = db_vector2_make(position->x, position->y + (t_state->glyphs.ascent * font_size));
-    db_array_vector4 *buffer  = &t_state->frame_instance;
+    db_vector2 pen_pos               = db_vector2_make(position->x, position->y + (t_state->glyphs.ascent * font_size));
+    db_array_glyph_instances *buffer = &t_state->instances;
 
     for (s32 i = 0; i < string->length; i++)
     {
@@ -216,44 +217,37 @@ void text_push_string(db_string *string, db_vector2 *position, db_vector3 *color
             pen_pos.y += text_line_height() * font_size;
         }
 
+        glyph_instance instance;
+
         // pen goes to em here, so only the pen is scaled. The matrix is already in em
-        db_vector4 v =
-            db_vector4_make(pen_pos.x / font_size, pen_pos.y / font_size, g->curves_indicies.x, g->curves_indicies.y);
-        db_vector4 col_n_font_size = db_vector4_make(color->x, color->y, color->z, font_size);
-        db_vector4 fr_row          = db_vector4_make(g->translation_matrix.data[0], g->translation_matrix.data[1],
-                                                     g->translation_matrix.data[2], g->translation_matrix.data[3]);
-        db_vector4 s_row           = db_vector4_make(g->translation_matrix.data[4], g->translation_matrix.data[5],
-                                                     g->translation_matrix.data[6], g->translation_matrix.data[7]);
-        db_vector4 t_row           = db_vector4_make(g->translation_matrix.data[8], g->translation_matrix.data[9],
-                                                     g->translation_matrix.data[10], g->translation_matrix.data[11]);
-        db_vector4 fo_row          = db_vector4_make(g->translation_matrix.data[12], g->translation_matrix.data[13],
-                                                     g->translation_matrix.data[14], g->translation_matrix.data[15]);
+        instance.pen_offset         = db_vector2_make(pen_pos.x / font_size, pen_pos.y / font_size);
+        instance.curve_indices      = db_vector2_make(g->curves_indicies.x, g->curves_indicies.y);
+        instance.color_and_font_px  = db_vector4_make(color->r, color->g, color->b, font_size);
+        instance.translation_matrix = g->translation_matrix;
 
-        db_array_vector4_append(buffer, v);
-        db_array_vector4_append(buffer, col_n_font_size);
-        db_array_vector4_append(buffer, fr_row);
-        db_array_vector4_append(buffer, s_row);
-        db_array_vector4_append(buffer, t_row);
-        db_array_vector4_append(buffer, fo_row);
-
-        for (s32 j = 0; j < NUMBER_OF_BANDS * 2; j += 2)
+        s32 k = 0;
+        for (s32 j = 0; j < NUMBER_OF_BANDS; j += 2)
         {
-            db_vector4 bands_ind =
+            instance.horizontal_band_locations[k++] =
                 db_vector4_make(g->bands_loc[j].x, g->bands_loc[j].y, g->bands_loc[j + 1].x, g->bands_loc[j + 1].y);
-            db_array_vector4_append(buffer, bands_ind);
         }
-
+        k = 0;
+        for (s32 j = NUMBER_OF_BANDS; j < NUMBER_OF_BANDS * 2; j += 2)
+        {
+            instance.vertical_band_locations[k++] =
+                db_vector4_make(g->bands_loc[j].x, g->bands_loc[j].y, g->bands_loc[j + 1].x, g->bands_loc[j + 1].y);
+        }
+        db_array_glyph_instances_append(buffer, instance);
         pen_pos.x += g->advance * font_size;
     }
 }
 
 void text_flush(u32 physical_width, u32 physical_height)
 {
-    __text_update_gpu_buffer(t_state->frame_instance.data,
-                             t_state->frame_instance.length * t_state->frame_instance.type_size);
+    __text_update_gpu_buffer(t_state->instances.data, t_state->instances.length * t_state->instances.type_size);
     __text_render(physical_width, physical_height);
     // should I reset the array?
-    t_state->frame_instance.length = 0;
+    t_state->instances.length = 0;
 }
 
 static f32 solve_bezier(f32 a, f32 b, f32 c, f32 t)

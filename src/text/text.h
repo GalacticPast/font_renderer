@@ -41,8 +41,17 @@ typedef struct
     const char     *font_name;
 } glyphs;
 
-// vec4s written per glyph by text_prepare_render_buffer: pen + curve range, then the 4 matrix columns
-#define TEXT_VEC4S_PER_GLYPH 14
+typedef struct
+{
+    db_vector2 pen_offset;
+    db_vector2 curve_indices;
+    db_vector4 color_and_font_px; // the last value of color is the font size
+    db_matrix4 translation_matrix;
+    db_vector4 horizontal_band_locations[4];
+    db_vector4 vertical_band_locations[4];
+} glyph_instance;
+
+db_array_decl(glyph_instances, glyph_instance);
 
 void text_init(db_arena *arena);
 void text_deinit();
