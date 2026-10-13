@@ -12,6 +12,7 @@ typedef struct
     // width/height * display_scale: the framebuffer size. Viewport and projection both use these
     u32 physical_width;
     u32 physical_height;
+
 } renderer_state;
 
 static renderer_state *r_state;

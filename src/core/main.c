@@ -7,24 +7,6 @@
 
 #define ONE_TWENTIETH 0.05f
 
-// logical size: what the compositor lays the window out with
-
-// physical pixels per logical unit. Set from the compositor after startup
-// static f32 display_scale = 1.0f;
-//
-// typedef struct camera
-// {
-//     db_vector3 position;
-//     db_vector3 orientation;
-//     db_vector3 up;
-//
-//     f32 speed;
-//     f32 sensitivity;
-//     f32 yaw;
-//     f32 pitch;
-//     f32 fov;
-// } camera;
-
 b8 update(db_arena *frame_arena);
 
 b8 application_startup(db_arena *main_arena)
@@ -82,7 +64,11 @@ int main()
 
         renderer_start_frame(&frame_arena);
         // wrap at the window's right edge
-        renderer_push_text(&str, &pos, &color, 24.0f, (f32)width - pos.x);
+        renderer_batch()
+        {
+            renderer_push_text(&str, &pos, &color, 24.0f, (f32)width - pos.x);
+        }
+
         renderer_end_frame();
         db_arena_reset(&frame_arena);
     }
