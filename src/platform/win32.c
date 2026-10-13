@@ -3,13 +3,17 @@
 // Include the full windows.h before db.h does, because db.h defines NOGDI/NOUSER and
 // windows.h's include guards would make a later #undef ineffective.
 #define WIN32_LEAN_AND_MEAN
-#include <wglext.h>
 #include <windows.h>
 #include <windowsx.h>
 
 #include "core/input.h"
 #include "glad/glad.h"
 #include "platform/platform.h"
+
+#define WGL_CONTEXT_MAJOR_VERSION_ARB 0x2091
+#define WGL_CONTEXT_MINOR_VERSION_ARB 0x2092
+#define WGL_CONTEXT_PROFILE_MASK_ARB 0x9126
+#define WGL_CONTEXT_CORE_PROFILE_BIT_ARB 0x00000001
 
 static f64           clock_frequency;
 static LARGE_INTEGER start_time;
