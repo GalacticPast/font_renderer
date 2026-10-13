@@ -8,11 +8,20 @@ signed distance field. The fragment shader works out how much of each pixel the
 glyph's quadratic Bézier curves cover. That keeps text sharp and anti-aliased at
 any size from one copy of the glyph data.
 
+![The same line of text at 12, 16, 20, 28, 36 and 48 px, each in a different color](screenshots/text_sizes.png)
+
+*12, 16, 20, 28, 36 and 48 px from the same glyph outlines (Archivo Regular,
+display scale 1.6).*
+
 The window layer, OpenGL loader setup, math and containers are written for the
 project. The only third-party code is `stb_truetype`, `glad` and the
 `xkbcommon` headers.
 
 ## Status
+
+**2D text rendering is complete and ready for others to use.** The text code
+lives in `src/text/` and the two shaders in `assets/shaders/`, and it can be
+taken as-is for screen-space text. It covers:
 
 - Glyph outlines load from a TrueType font (ASCII `' '`..`'~'`) and are stored
   as quadratic curves in em units.
@@ -27,10 +36,11 @@ project. The only third-party code is `stb_truetype`, `glad` and the
 - Logical units are scaled to physical pixels, so text stays crisp on HiDPI
   and fractionally scaled displays.
 
-In progress: batching so text and UI shapes can interleave in draw order.
-
-Not yet supported: kerning, non-ASCII text (shown as `?`), CFF/`.otf` fonts
+Known limitations: no kerning, non-ASCII text (shown as `?`), CFF/`.otf` fonts
 (cubic curves), more than one font, and text in a 3D scene.
+
+In progress, outside the text code: renderer batching, so text and UI shapes
+can be drawn interleaved in push order.
 
 ## Requirements
 
@@ -108,3 +118,40 @@ working notes on the current state.
 - [stb_truetype](https://github.com/nothings/stb) by Sean Barrett.
 - [glad](https://github.com/Dav1dde/glad) OpenGL loader.
 - Font: Archivo by Omnibus-Type, under the SIL Open Font License.
+
+## License
+
+This project's own code is released into the public domain under the
+[Unlicense](LICENSE). You can use it for anything, with no conditions.
+
+If you use it, I'd appreciate a line in your credits, for example:
+
+> Text rendering based on [font_renderer](https://github.com/GalacticPast/font_renderer) by GalacticPast.
+
+That's a request, not a requirement.
+
+Third-party files keep their own licenses and are not covered by the
+Unlicense:
+
+- `vendor/`: stb_truetype, glad and the xkbcommon headers
+- `src/platform/wayland/`: files generated from Wayland protocol definitions
+  (MIT, copyright their respective authors)
+- `assets/font/`: Archivo, under the SIL Open Font License
+
+## AI use disclosure
+
+All code in this repository was written by me, except the fragment shader
+(`assets/shaders/text_fragment.glsl`), which was written with help from an AI
+assistant, Claude (Anthropic), through Claude Code. I plan to rewrite the
+fragment shader myself; this section will be updated when that is done.
+
+Other AI use:
+
+- **Mentoring and code review.** Claude was used as an engineering mentor,
+  following the rules in `AGENTS.md`. It explained the Slug algorithm and
+  renderer architecture (batching, instance layouts, draw ordering) and
+  reviewed my code for bugs, which I then fixed myself.
+- **Documentation.** `README.md` and `progress.md` were drafted by AI from the
+  code and our discussions, then reviewed by me.
+- **Repository.** One merge commit was completed by AI and is marked with a
+  `Co-Authored-By` trailer.
